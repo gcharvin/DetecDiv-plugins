@@ -4,12 +4,16 @@ function fig = detecdiv_plugins_browser(varargin)
 opts = localParseInputs(varargin{:});
 plugins = localDiscoverPlugins(opts.Roots);
 
-fig = uifigure('Name', 'DetecDiv plugins', 'Position', [120 120 1080 640]);
+fig = uifigure('Name', 'DetecDiv plugins', 'Position', [120 120 1200 760]);
+try
+    fig.WindowState = 'maximized';
+catch
+end
 main = uigridlayout(fig, [1 2]);
-main.ColumnWidth = {360, '1x'};
+main.ColumnWidth = {380, '1x'};
 main.RowHeight = {'1x'};
-main.Padding = [10 10 10 10];
-main.ColumnSpacing = 10;
+main.Padding = [12 12 12 12];
+main.ColumnSpacing = 14;
 
 left = uigridlayout(main, [3 1]);
 left.RowHeight = {24, '1x', 34};
@@ -29,17 +33,24 @@ bar.Padding = [0 0 0 0];
 status = uilabel(bar, 'Text', sprintf('%d plugin(s)', numel(plugins)));
 uibutton(bar, 'Text', 'Refresh', 'ButtonPushedFcn', @refreshPlugins);
 
-right = uigridlayout(main, [6 1]);
-right.RowHeight = {28, 70, 120, 120, '1x', 32};
+right = uigridlayout(main, [5 1]);
+right.RowHeight = {30, 120, '1x', 190, 34};
 right.ColumnWidth = {'1x'};
 right.Padding = [0 0 0 0];
-right.RowSpacing = 8;
+right.RowSpacing = 10;
 
 titleLabel = uilabel(right, 'Text', 'Select a plugin', 'FontWeight', 'bold', 'FontSize', 15);
-summaryBox = uitextarea(right, 'Editable', 'off', 'Value', {'Business description'});
-ioBox = uitextarea(right, 'Editable', 'off', 'Value', {'Inputs / outputs'});
-paramsBox = uitextarea(right, 'Editable', 'off', 'Value', {'Parameters'});
-codeBox = uitextarea(right, 'Editable', 'off', 'Value', {'Code and manifest'});
+summaryBox = localLabeledTextArea(right, 'Business description');
+
+middle = uigridlayout(right, [1 2]);
+middle.ColumnWidth = {'1x', '1x'};
+middle.RowHeight = {'1x'};
+middle.Padding = [0 0 0 0];
+middle.ColumnSpacing = 10;
+ioBox = localLabeledTextArea(middle, 'Inputs / outputs');
+paramsBox = localLabeledTextArea(middle, 'Parameters');
+
+codeBox = localLabeledTextArea(right, 'Code and manifest');
 buttonRow = uigridlayout(right, [1 4]);
 buttonRow.ColumnWidth = {130, 130, 130, '1x'};
 buttonRow.Padding = [0 0 0 0];
@@ -225,7 +236,7 @@ end
 
 function plugins = localAttachSpecs(plugins)
 for i = 1:numel(plugins)
-    if ~isfield(plugins, 'spec') || numel(plugins) < i || ~isfield(plugins(i), 'spec')
+    if ~isfield(plugins, 'spec') || isempty(localGetField(plugins(i), 'spec', []))
         plugins(i).spec = localLoadSpec(plugins(i).root, plugins(i).name);
     end
 end
@@ -265,12 +276,20 @@ end
 rehash;
 try
     f = [pkg '.executionSpec'];
-    if exist(f, 'file') == 2
-        spec = feval(f);
-    end
+    spec = feval(f);
 catch ME
     spec = struct('error', ME.message);
 end
+end
+
+function txt = localLabeledTextArea(parent, labelText)
+panel = uigridlayout(parent, [2 1]);
+panel.RowHeight = {22, '1x'};
+panel.ColumnWidth = {'1x'};
+panel.Padding = [0 0 0 0];
+panel.RowSpacing = 3;
+uilabel(panel, 'Text', labelText, 'FontWeight', 'bold');
+txt = uitextarea(panel, 'Editable', 'off', 'Value', {labelText});
 end
 
 function data = localTableData(plugins)
@@ -302,12 +321,12 @@ function lines = localIoLines(p)
 lines = {};
 if isfield(p.spec, 'contract') && isstruct(p.spec.contract)
     c = p.spec.contract;
-    lines = [lines; {'Inputs:'}; localPortLines(localGetField(c, 'in', []))]; %#ok<AGROW>
-    lines = [lines; {''; 'Outputs:'}; localPortLines(localGetField(c, 'out', []))]; %#ok<AGROW>
+    lines = [lines; {'Inputs:'}; localColumn(localPortLines(localGetField(c, 'in', [])))]; %#ok<AGROW>
+    lines = [lines; {''; 'Outputs:'}; localColumn(localPortLines(localGetField(c, 'out', [])))]; %#ok<AGROW>
     resources = localGetField(c, 'resources', struct());
     if isstruct(resources)
-        lines = [lines; {''; 'Input resources:'}; localResourceLines(localGetField(resources, 'in', []))]; %#ok<AGROW>
-        lines = [lines; {''; 'Output resources:'}; localResourceLines(localGetField(resources, 'out', []))]; %#ok<AGROW>
+        lines = [lines; {''; 'Input resources:'}; localColumn(localResourceLines(localGetField(resources, 'in', [])))]; %#ok<AGROW>
+        lines = [lines; {''; 'Output resources:'}; localColumn(localResourceLines(localGetField(resources, 'out', [])))]; %#ok<AGROW>
     end
 else
     lines = {'No executionSpec.contract found.'};
@@ -317,13 +336,13 @@ end
 function lines = localParamLines(p)
 lines = {};
 if isfield(p.spec, 'staticKeys')
-    lines = [lines; {'Static parameters:'}; localCellLines(p.spec.staticKeys)]; %#ok<AGROW>
+    lines = [lines; {'Static parameters:'}; localColumn(localCellLines(p.spec.staticKeys))]; %#ok<AGROW>
 end
 if isfield(p.spec, 'outputKeys')
-    lines = [lines; {''; 'Output parameters:'}; localCellLines(p.spec.outputKeys)]; %#ok<AGROW>
+    lines = [lines; {''; 'Output parameters:'}; localColumn(localCellLines(p.spec.outputKeys))]; %#ok<AGROW>
 end
 if isfield(p.spec, 'defaults') && isstruct(p.spec.defaults)
-    lines = [lines; {''; 'Defaults:'}; localStructValueLines(p.spec.defaults)]; %#ok<AGROW>
+    lines = [lines; {''; 'Defaults:'}; localColumn(localStructValueLines(p.spec.defaults))]; %#ok<AGROW>
 end
 if isempty(lines)
     lines = {'No parameter metadata found.'};
@@ -390,6 +409,11 @@ values = cellstr(string(values));
 lines = strcat('- ', values(:));
 end
 
+function out = localColumn(values)
+out = cellstr(string(values));
+out = out(:);
+end
+
 function lines = localStructValueLines(S)
 fn = fieldnames(S);
 lines = cell(numel(fn), 1);
@@ -430,4 +454,3 @@ else
     system(['xdg-open "' pathStr '" &']);
 end
 end
-
