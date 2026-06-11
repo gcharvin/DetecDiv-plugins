@@ -42,12 +42,13 @@ right.RowSpacing = 10;
 titleLabel = uilabel(right, 'Text', 'Select a plugin', 'FontWeight', 'bold', 'FontSize', 15);
 summaryBox = localLabeledTextArea(right, 'Business description');
 
-middle = uigridlayout(right, [1 2]);
-middle.ColumnWidth = {'1x', '1x'};
+middle = uigridlayout(right, [1 3]);
+middle.ColumnWidth = {'1x', '1x', '1x'};
 middle.RowHeight = {'1x'};
 middle.Padding = [0 0 0 0];
 middle.ColumnSpacing = 10;
-ioBox = localLabeledTextArea(middle, 'Inputs / outputs');
+contractBox = localLabeledTextArea(middle, 'Prerequisites / behavior');
+ioBox = localLabeledTextArea(middle, 'Ports / resources');
 paramsBox = localLabeledTextArea(middle, 'Parameters');
 
 codeBox = localLabeledTextArea(right, 'Code and manifest');
@@ -102,6 +103,7 @@ end
     function renderEmpty()
         titleLabel.Text = 'No plugin selected';
         summaryBox.Value = {'No external plugin was found.'};
+        contractBox.Value = {''};
         ioBox.Value = {''};
         paramsBox.Value = {''};
         codeBox.Value = {''};
@@ -114,6 +116,7 @@ end
         p = plugins(row);
         titleLabel.Text = sprintf('%s (%s)', p.name, p.type);
         summaryBox.Value = localSummaryLines(p);
+        contractBox.Value = localContractLines(p);
         ioBox.Value = localIoLines(p);
         paramsBox.Value = localParamLines(p);
         codeBox.Value = localCodeLines(p);
@@ -321,8 +324,8 @@ function lines = localIoLines(p)
 lines = {};
 if isfield(p.spec, 'contract') && isstruct(p.spec.contract)
     c = p.spec.contract;
-    lines = [lines; {'Inputs:'}; localColumn(localPortLines(localGetField(c, 'in', [])))]; %#ok<AGROW>
-    lines = [lines; {''; 'Outputs:'}; localColumn(localPortLines(localGetField(c, 'out', [])))]; %#ok<AGROW>
+    lines = [lines; {'Input ports:'}; localColumn(localPortLines(localGetField(c, 'in', [])))]; %#ok<AGROW>
+    lines = [lines; {''; 'Output ports:'}; localColumn(localPortLines(localGetField(c, 'out', [])))]; %#ok<AGROW>
     resources = localGetField(c, 'resources', struct());
     if isstruct(resources)
         lines = [lines; {''; 'Input resources:'}; localColumn(localResourceLines(localGetField(resources, 'in', [])))]; %#ok<AGROW>
@@ -333,10 +336,39 @@ else
 end
 end
 
+function lines = localContractLines(p)
+lines = {};
+if ~isfield(p.spec, 'contract') || ~isstruct(p.spec.contract)
+    lines = {'No executionSpec.contract found.'};
+    return;
+end
+
+c = p.spec.contract;
+if isfield(c, 'summary') && ~isempty(c.summary)
+    lines = [lines; {'Summary:'; char(string(c.summary)); ''}]; %#ok<AGROW>
+end
+
+requirements = localGetField(c, 'requirements', struct());
+lines = [lines; {'Prerequisites:'}; localColumn(localRequirementLines(requirements))]; %#ok<AGROW>
+
+binding = localGetField(c, 'binding', struct());
+lines = [lines; {''; 'Binding / resolution:'}; localColumn(localStructTreeLines(binding, '- '))]; %#ok<AGROW>
+
+selectors = localGetField(c, 'selectors', struct());
+lines = [lines; {''; 'Selectors / output naming:'}; localColumn(localStructTreeLines(selectors, '- '))]; %#ok<AGROW>
+
+capabilities = localGetField(c, 'capabilities', struct());
+lines = [lines; {''; 'Capabilities:'}; localColumn(localStructTreeLines(capabilities, '- '))]; %#ok<AGROW>
+end
+
 function lines = localParamLines(p)
 lines = {};
+if isfield(p.spec, 'contract') && isstruct(p.spec.contract) && ...
+        isfield(p.spec.contract, 'parameters') && isstruct(p.spec.contract.parameters)
+    lines = [lines; {'Contract parameter groups:'}; localColumn(localStructTreeLines(p.spec.contract.parameters, '- '))]; %#ok<AGROW>
+end
 if isfield(p.spec, 'staticKeys')
-    lines = [lines; {'Static parameters:'}; localColumn(localCellLines(p.spec.staticKeys))]; %#ok<AGROW>
+    lines = [lines; {''; 'Static parameters:'}; localColumn(localCellLines(p.spec.staticKeys))]; %#ok<AGROW>
 end
 if isfield(p.spec, 'outputKeys')
     lines = [lines; {''; 'Output parameters:'}; localColumn(localCellLines(p.spec.outputKeys))]; %#ok<AGROW>
@@ -383,7 +415,9 @@ for i = 1:numel(ports)
     name = localGetField(item, 'name', '');
     type = localGetField(item, 'type', '');
     required = localGetField(item, 'required', false);
-    lines{end+1} = sprintf('- %s : %s required=%s', char(string(name)), char(string(type)), mat2str(logical(required))); %#ok<AGROW>
+    source = localGetField(item, 'source', '');
+    lines{end+1} = sprintf('- %s : %s | required=%s | source=%s', ...
+        char(string(name)), char(string(type)), mat2str(logical(required)), char(string(source))); %#ok<AGROW>
 end
 end
 
@@ -397,10 +431,35 @@ for i = 1:numel(resources)
     r = resources(i);
     type = localGetField(r, 'type', '');
     role = localGetField(r, 'role', '');
+    symbol = localGetField(r, 'symbol', '');
     param = localGetField(r, 'param', '');
+    port = localGetField(r, 'port', '');
     nameParam = localGetField(r, 'nameParam', '');
-    lines{end+1} = sprintf('- %s role=%s param=%s nameParam=%s', ...
-        char(string(type)), char(string(role)), char(string(param)), char(string(nameParam))); %#ok<AGROW>
+    required = localGetField(r, 'required', false);
+    transfer = localGetField(r, 'transfer', '');
+    lines{end+1} = sprintf('- %s | role=%s | symbol=%s | param=%s | port=%s | nameParam=%s | required=%s | transfer=%s', ...
+        char(string(type)), char(string(role)), char(string(symbol)), char(string(param)), ...
+        char(string(port)), char(string(nameParam)), mat2str(logical(required)), char(string(transfer))); %#ok<AGROW>
+end
+end
+
+function lines = localRequirementLines(requirements)
+if isempty(requirements) || ~isstruct(requirements) || isempty(fieldnames(requirements))
+    lines = {'- none declared'};
+    return;
+end
+lines = {};
+groups = fieldnames(requirements);
+for i = 1:numel(groups)
+    groupName = groups{i};
+    value = requirements.(groupName);
+    if isstruct(value)
+        lines{end+1} = ['- ' groupName ':']; %#ok<AGROW>
+        nested = localStructTreeLines(value, '  - ');
+        lines = [lines; localColumn(nested)]; %#ok<AGROW>
+    else
+        lines{end+1} = ['- ' groupName ': ' localValueToText(value)]; %#ok<AGROW>
+    end
 end
 end
 
@@ -420,6 +479,29 @@ lines = cell(numel(fn), 1);
 for i = 1:numel(fn)
     val = S.(fn{i});
     lines{i} = ['- ' fn{i} ': ' localValueToText(val)];
+end
+end
+
+function lines = localStructTreeLines(S, prefix)
+if nargin < 2
+    prefix = '- ';
+end
+if isempty(S) || ~isstruct(S) || isempty(fieldnames(S))
+    lines = {'- none declared'};
+    return;
+end
+lines = {};
+fn = fieldnames(S);
+for i = 1:numel(fn)
+    key = fn{i};
+    val = S.(key);
+    if isstruct(val) && isscalar(val)
+        lines{end+1} = [prefix key ':']; %#ok<AGROW>
+        nested = localStructTreeLines(val, ['  ' prefix]);
+        lines = [lines; localColumn(nested)]; %#ok<AGROW>
+    else
+        lines{end+1} = [prefix key ': ' localValueToText(val)]; %#ok<AGROW>
+    end
 end
 end
 
