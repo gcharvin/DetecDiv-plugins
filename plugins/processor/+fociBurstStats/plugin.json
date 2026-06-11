@@ -1,0 +1,13 @@
+{
+  "name": "fociBurstStats",
+  "version": "0.1.0",
+  "type": "processor",
+  "entrypoint": "fociBurstStats.process",
+  "setparam": "fociBurstStats.setparam",
+  "executionSpec": "fociBurstStats.executionSpec",
+  "summary": "Computes foci burst intervals from ROI classification dataseries and writes ROI dataseries plus Excel artifacts.",
+  "detecdiv": {
+    "minVersion": "0.8.0"
+  }
+}
+

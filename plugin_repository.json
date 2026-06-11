@@ -1,0 +1,10 @@
+{
+  "name": "DetecDiv-plugins",
+  "version": "0.1.0",
+  "detecdiv": {
+    "minVersion": "0.8.0"
+  },
+  "layout": "plugins/<type>/+<package>",
+  "types": ["processor", "classifier"]
+}
+

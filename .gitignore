@@ -1,0 +1,18 @@
+# MATLAB and local runtime artifacts
+*.asv
+*.m~
+*.mat
+*.fig
+*.mex*
+
+# Generated outputs
+outputs/
+artifacts/
+work/
+*.xlsx
+*.png
+
+# OS/editor metadata
+.DS_Store
+Thumbs.db
+.vscode/
