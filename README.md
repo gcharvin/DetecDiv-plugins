@@ -26,5 +26,10 @@ detecdiv_plugins_addpath
 detecdiv_plugins_list
 ```
 
-`pipeline2` can discover registered plugins dynamically. The pipeline template should keep the module `type` and package name, while the local DetecDiv preferences remember where external plugin roots are installed on the current machine.
+Browse installed plugins and their contracts:
 
+```matlab
+detecdiv_plugins_browser
+```
+
+`pipeline2` can discover registered plugins dynamically. The pipeline template should keep the module `type` and package name, while the local DetecDiv preferences remember where external plugin roots are installed on the current machine.
