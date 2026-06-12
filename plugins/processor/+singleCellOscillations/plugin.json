@@ -1,0 +1,12 @@
+{
+  "name": "singleCellOscillations",
+  "version": "0.1.0",
+  "type": "processor",
+  "entrypoint": "singleCellOscillations.process",
+  "setparam": "singleCellOscillations.setparam",
+  "executionSpec": "singleCellOscillations.executionSpec",
+  "summary": "Extracts detrended single-cell fluorescence oscillations from classification and quantification dataseries, then writes temporal normalized-cycle dataseries.",
+  "detecdiv": {
+    "minVersion": "0.8.0"
+  }
+}
