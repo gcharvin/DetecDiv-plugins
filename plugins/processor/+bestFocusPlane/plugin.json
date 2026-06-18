@@ -1,0 +1,12 @@
+﻿{
+  "name": "bestFocusPlane",
+  "version": "0.1.0",
+  "type": "processor",
+  "entrypoint": "bestFocusPlane.process",
+  "setparam": "bestFocusPlane.setparam",
+  "executionSpec": "bestFocusPlane.executionSpec",
+  "summary": "Adds a best-focus ROI channel selected independently per ROI and frame from a z-stack.",
+  "detecdiv": {
+    "minVersion": "0.8.0"
+  }
+}
