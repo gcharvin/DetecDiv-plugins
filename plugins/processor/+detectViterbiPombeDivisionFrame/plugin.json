@@ -1,0 +1,12 @@
+{
+  "name": "detectViterbiPombeDivisionFrame",
+  "version": "0.1.0",
+  "type": "processor",
+  "entrypoint": "detectViterbiPombeDivisionFrame.process",
+  "setparam": "detectViterbiPombeDivisionFrame.setparam",
+  "executionSpec": "detectViterbiPombeDivisionFrame.executionSpec",
+  "summary": "Tracks the pombe cell of interest by Viterbi and scores septum appearance from an intensity profile.",
+  "detecdiv": {
+    "minVersion": "0.8.0"
+  }
+}
