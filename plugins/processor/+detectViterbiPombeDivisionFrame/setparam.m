@@ -115,6 +115,9 @@ tip{end+1} = 'STATIC: fraction of both profile edges ignored for septum scoring'
 paramout.septumPolarity = {'dark','bright','absolute','dark'};
 tip{end+1} = 'STATIC: septum contrast polarity in normalized profile';
 
+paramout.septumScoreThreshold = 1.5;
+tip{end+1} = 'STATIC: septum is detected when septumScore is above this robust-normalized threshold';
+
 paramout.debug = false;
 tip{end+1} = 'STATIC: verbose diagnostic output';
 
