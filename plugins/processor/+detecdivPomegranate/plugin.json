@@ -1,0 +1,12 @@
+{
+  "name": "detecdivPomegranate",
+  "version": "0.1.0",
+  "type": "processor",
+  "entrypoint": "detecdivPomegranate.process",
+  "setparam": "detecdivPomegranate.setparam",
+  "executionSpec": "detecdivPomegranate.executionSpec",
+  "summary": "Pomegranate-like 3D reconstruction and cytometric morphology measurement for a selected pombe cell.",
+  "detecdiv": {
+    "minVersion": "0.8.0"
+  }
+}
