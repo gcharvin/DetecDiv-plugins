@@ -13,5 +13,6 @@ It writes:
 - Pomegranate-compatible `*_Results_Full.csv` files and the optional Excel workbook. These are the legacy-style tabular outputs.
 - `cell_information`, a non-temporal dataseries whose `.data` table stores a compact DetecDiv summary and whose `userData` contains enriched Pomegranate-like morphology/cytometry measurements, the reconstructed 3D mask, QC images, and artifact paths.
 - ROI-local PNG QC artifacts: `*_pomegranate_qc_overlay.png` and `*_pomegranate_qc_summary.png`.
+- A workbook-local PNG mosaic, `detecdiv_pomegranate_mosaic.png`, assembled from one annotated tile per processed ROI. Each tile shows the best-Z raw plane, segmented contour, ellipse fit, major/minor axes, ROI id, frame, best-Z plane, and reconstructed volume in pixels cubed.
 
 The 3D reconstruction follows the ImageJ Pomegranate idea: clean the mid-plane mask, compute a distance transform, skeletonize it to obtain a medial axis with local radii, then reconstruct each z-slice as the union of disks with radius `sqrt(r^2 - dz^2)`.

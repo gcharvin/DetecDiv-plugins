@@ -50,6 +50,12 @@ tip{end+1} = 'STATIC: write/update an Excel workbook with Pomegranate-compatible
 paramout.writeQcImages = true;
 tip{end+1} = 'STATIC: write PNG QC images in each ROI folder';
 
+paramout.writeMosaicImage = true;
+tip{end+1} = 'STATIC: write/update a PNG mosaic next to the Excel workbook';
+
+paramout.mosaicFileName = 'detecdiv_pomegranate_mosaic.png';
+tip{end+1} = 'OUTPUT artifact: PNG mosaic collecting all processed ROI QC tiles';
+
 paramout.experimentName = '';
 tip{end+1} = 'STATIC: experiment name written in the Pomegranate-compatible output table';
 

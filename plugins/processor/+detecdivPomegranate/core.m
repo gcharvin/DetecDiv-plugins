@@ -411,8 +411,10 @@ files = struct('outputDir', outputDir, 'csvPath', csvPath, 'workbookPath', workb
 end
 
 function qcFiles = writeQcArtifacts(measurement, paramout, roiobj, recon)
-qcFiles = struct('summaryPng', '', 'overlayPng', '');
-if ~logicalParam(paramout, 'writeQcImages', true)
+qcFiles = struct('summaryPng', '', 'overlayPng', '', 'mosaicTilePng', '', 'mosaicPng', '');
+writeQc = logicalParam(paramout, 'writeQcImages', true);
+writeMosaic = logicalParam(paramout, 'writeMosaicImage', true);
+if ~writeQc && ~writeMosaic
     return;
 end
 roiDir = '';
@@ -423,33 +425,162 @@ try
 catch
     roiDir = '';
 end
-if isempty(roiDir) || exist(roiDir, 'dir') ~= 7
-    return;
-end
 
 safeId = matlab.lang.makeValidName(nonemptyChar(safeRoiId(roiobj), 'roi'));
-overlayPath = fullfile(roiDir, [safeId '_pomegranate_qc_overlay.png']);
-summaryPath = fullfile(roiDir, [safeId '_pomegranate_qc_summary.png']);
+if writeQc && ~isempty(roiDir) && exist(roiDir, 'dir') == 7
+    overlayPath = fullfile(roiDir, [safeId '_pomegranate_qc_overlay.png']);
+    summaryPath = fullfile(roiDir, [safeId '_pomegranate_qc_summary.png']);
 
-try
-    imwrite(measurement.qc.overlayMidSliceRgb, overlayPath);
-    qcFiles.overlayPng = overlayPath;
-catch ME
-    warning('detecdivPomegranate:QcOverlayWriteFailed', ...
-        'Could not write QC overlay for ROI "%s": %s', safeId, ME.message);
+    try
+        imwrite(measurement.qc.overlayMidSliceRgb, overlayPath);
+        qcFiles.overlayPng = overlayPath;
+    catch ME
+        warning('detecdivPomegranate:QcOverlayWriteFailed', ...
+            'Could not write QC overlay for ROI "%s": %s', safeId, ME.message);
+    end
+
+    try
+        rawRgb = repmat(normalizeToUint8(measurement.qc.rawMidSlice), 1, 1, 3);
+        reconMidRgb = maskToRgb(measurement.qc.midReconstructionMask, [255 128 0]);
+        reconDepthRgb = depthProjectionRgb(measurement, recon);
+        summary = tileRgbImages({rawRgb, measurement.qc.overlayMidSliceRgb, reconMidRgb, reconDepthRgb}, 8);
+        imwrite(summary, summaryPath);
+        qcFiles.summaryPng = summaryPath;
+    catch ME
+        warning('detecdivPomegranate:QcSummaryWriteFailed', ...
+            'Could not write QC summary for ROI "%s": %s', safeId, ME.message);
+    end
 end
 
-try
-    rawRgb = repmat(normalizeToUint8(measurement.qc.rawMidSlice), 1, 1, 3);
-    reconMidRgb = maskToRgb(measurement.qc.midReconstructionMask, [255 128 0]);
-    reconDepthRgb = depthProjectionRgb(measurement, recon);
-    summary = tileRgbImages({rawRgb, measurement.qc.overlayMidSliceRgb, reconMidRgb, reconDepthRgb}, 8);
-    imwrite(summary, summaryPath);
-    qcFiles.summaryPng = summaryPath;
-catch ME
-    warning('detecdivPomegranate:QcSummaryWriteFailed', ...
-        'Could not write QC summary for ROI "%s": %s', safeId, ME.message);
+if writeMosaic
+    outputDir = '';
+    if isfield(measurement, 'files') && isstruct(measurement.files) && ...
+            isfield(measurement.files, 'outputDir') && ~isempty(measurement.files.outputDir)
+        outputDir = char(string(measurement.files.outputDir));
+    end
+    if ~isempty(outputDir) && exist(outputDir, 'dir') == 7
+        tilePath = fullfile(outputDir, [safeId '_pomegranate_mosaic_tile.png']);
+        mosaicName = '';
+        if isfield(paramout, 'mosaicFileName') && ~isempty(paramout.mosaicFileName)
+            mosaicName = paramout.mosaicFileName;
+        end
+        mosaicName = nonemptyChar(mosaicName, 'detecdiv_pomegranate_mosaic.png');
+        mosaicPath = fullfile(outputDir, mosaicName);
+        try
+            writeMosaicTile(measurement, tilePath);
+            qcFiles.mosaicTilePng = tilePath;
+            updateMosaicImage(outputDir, mosaicPath);
+            qcFiles.mosaicPng = mosaicPath;
+        catch ME
+            warning('detecdivPomegranate:MosaicWriteFailed', ...
+                'Could not write/update Pomegranate mosaic for ROI "%s": %s', safeId, ME.message);
+        end
+    end
 end
+end
+
+function writeMosaicTile(measurement, tilePath)
+fig = figure('Visible', 'off', 'Color', 'w', 'Units', 'pixels', ...
+    'Position', [100 100 560 620]);
+cleaner = onCleanup(@() close(fig)); %#ok<NASGU>
+ax = axes(fig, 'Units', 'normalized', 'Position', [0.06 0.15 0.88 0.78]);
+imagesc(ax, measurement.qc.rawMidSlice);
+axis(ax, 'image');
+axis(ax, 'off');
+colormap(ax, gray(256));
+hold(ax, 'on');
+
+plotMaskBoundaries(ax, measurement.qc.midMask, [1 0 0], 1.5);
+plotEllipseAndAxes(ax, measurement);
+addTileText(fig, measurement);
+
+exportgraphics(fig, tilePath, 'Resolution', 150);
+end
+
+function plotMaskBoundaries(ax, mask, color, lineWidth)
+if ~any(mask(:))
+    return;
+end
+B = bwboundaries(mask);
+for i = 1:numel(B)
+    b = B{i};
+    plot(ax, b(:,2), b(:,1), 'Color', color, 'LineWidth', lineWidth);
+end
+end
+
+function plotEllipseAndAxes(ax, measurement)
+cx = measurement.centroid_x_px;
+cy = measurement.centroid_y_px;
+maj = measurement.majorAxis_px;
+minr = measurement.minorAxis_px;
+if ~all(isfinite([cx cy maj minr measurement.orientation_deg]))
+    return;
+end
+theta = -measurement.orientation_deg * pi / 180;
+t = linspace(0, 2*pi, 240);
+a = maj / 2;
+b = minr / 2;
+x = a * cos(t);
+y = b * sin(t);
+xr = x * cos(theta) - y * sin(theta) + cx;
+yr = x * sin(theta) + y * cos(theta) + cy;
+plot(ax, xr, yr, 'Color', [0 1 0], 'LineWidth', 1.5);
+
+majorX = [cx - a*cos(theta), cx + a*cos(theta)];
+majorY = [cy - a*sin(theta), cy + a*sin(theta)];
+minorTheta = theta + pi/2;
+minorX = [cx - b*cos(minorTheta), cx + b*cos(minorTheta)];
+minorY = [cy - b*sin(minorTheta), cy + b*sin(minorTheta)];
+plot(ax, majorX, majorY, 'Color', [0 1 1], 'LineWidth', 1.4);
+plot(ax, minorX, minorY, 'Color', [1 0.85 0], 'LineWidth', 1.4);
+plot(ax, cx, cy, '+', 'Color', [1 1 1], 'LineWidth', 1.2, 'MarkerSize', 8);
+end
+
+function addTileText(fig, measurement)
+roiId = safeText(measurement.source.roiId, 'ROI');
+titleText = sprintf('%s | frame/time %d | bestZ %d | volume %.0f px^3', ...
+    roiId, round(measurement.frame), round(measurement.midSlice), measurement.volume_voxels);
+metricText = sprintf(['red: segmented contour   green: ellipse\n' ...
+    'cyan: major %.1f px / %.2f um   yellow: minor %.1f px / %.2f um'], ...
+    measurement.majorAxis_px, measurement.majorAxis_um, measurement.minorAxis_px, measurement.minorAxis_um);
+annotation(fig, 'textbox', [0.04 0.935 0.92 0.045], 'String', titleText, ...
+    'Interpreter', 'none', 'EdgeColor', 'none', 'HorizontalAlignment', 'center', ...
+    'FontWeight', 'bold', 'FontSize', 11, 'Color', [0 0 0]);
+annotation(fig, 'textbox', [0.04 0.025 0.92 0.095], 'String', metricText, ...
+    'Interpreter', 'none', 'EdgeColor', 'none', 'HorizontalAlignment', 'center', ...
+    'FontSize', 8.5, 'Color', [0.05 0.05 0.05]);
+end
+
+function updateMosaicImage(outputDir, mosaicPath)
+files = dir(fullfile(outputDir, '*_pomegranate_mosaic_tile.png'));
+if isempty(files)
+    return;
+end
+[~, ord] = sort({files.name});
+files = files(ord);
+imgs = cell(1, numel(files));
+for i = 1:numel(files)
+    imgs{i} = imread(fullfile(files(i).folder, files(i).name));
+end
+targetH = max(cellfun(@(x) size(x, 1), imgs));
+targetW = max(cellfun(@(x) size(x, 2), imgs));
+for i = 1:numel(imgs)
+    imgs{i} = padOrResizeRgb(imgs{i}, targetH, targetW);
+end
+n = numel(imgs);
+cols = ceil(sqrt(n));
+rows = ceil(n / cols);
+gap = 12;
+canvas = uint8(255 * ones(rows * targetH + (rows - 1) * gap, ...
+    cols * targetW + (cols - 1) * gap, 3));
+for i = 1:n
+    r = floor((i - 1) / cols) + 1;
+    c = mod(i - 1, cols) + 1;
+    y0 = (r - 1) * (targetH + gap) + 1;
+    x0 = (c - 1) * (targetW + gap) + 1;
+    canvas(y0:y0+targetH-1, x0:x0+targetW-1, :) = imgs{i};
+end
+imwrite(canvas, mosaicPath);
 end
 
 function rgb = maskToRgb(mask, color)
