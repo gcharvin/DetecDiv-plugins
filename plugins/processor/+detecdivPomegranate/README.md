@@ -10,6 +10,8 @@ The processor consumes:
 
 It writes:
 
-- `cell_information`, a non-temporal dataseries whose `userData` contains Pomegranate-like morphology/cytometry measurements, the reconstructed 3D mask, and QC overlay images.
+- Pomegranate-compatible `*_Results_Full.csv` files and the optional Excel workbook. These are the legacy-style tabular outputs.
+- `cell_information`, a non-temporal dataseries whose `.data` table stores a compact DetecDiv summary and whose `userData` contains enriched Pomegranate-like morphology/cytometry measurements, the reconstructed 3D mask, QC images, and artifact paths.
+- ROI-local PNG QC artifacts: `*_pomegranate_qc_overlay.png` and `*_pomegranate_qc_summary.png`.
 
 The 3D reconstruction follows the ImageJ Pomegranate idea: clean the mid-plane mask, compute a distance transform, skeletonize it to obtain a medial axis with local radii, then reconstruct each z-slice as the union of disks with radius `sqrt(r^2 - dz^2)`.

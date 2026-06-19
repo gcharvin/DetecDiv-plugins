@@ -53,6 +53,7 @@ measurement.source = struct( ...
 measurement.qc = buildQc(midRaw, midMask, recon(:, :, midSlice), measurement);
 measurement.pomegranateResults = buildPomegranateResultsTable(measurement, stackFrame, recon, frame, midSlice, paramout);
 measurement.files = writePomegranateArtifacts(measurement.pomegranateResults, paramout, roiobj, ctx);
+measurement.files.qc = writeQcArtifacts(measurement, paramout, roiobj, recon);
 if logicalParam(paramout, 'storeReconstructionMask', true)
     measurement.reconstructionMask = recon;
 else
@@ -409,6 +410,131 @@ end
 files = struct('outputDir', outputDir, 'csvPath', csvPath, 'workbookPath', workbookPath);
 end
 
+function qcFiles = writeQcArtifacts(measurement, paramout, roiobj, recon)
+qcFiles = struct('summaryPng', '', 'overlayPng', '');
+if ~logicalParam(paramout, 'writeQcImages', true)
+    return;
+end
+roiDir = '';
+try
+    if isprop(roiobj, 'path') && ~isempty(roiobj.path)
+        roiDir = char(string(roiobj.path));
+    end
+catch
+    roiDir = '';
+end
+if isempty(roiDir) || exist(roiDir, 'dir') ~= 7
+    return;
+end
+
+safeId = matlab.lang.makeValidName(nonemptyChar(safeRoiId(roiobj), 'roi'));
+overlayPath = fullfile(roiDir, [safeId '_pomegranate_qc_overlay.png']);
+summaryPath = fullfile(roiDir, [safeId '_pomegranate_qc_summary.png']);
+
+try
+    imwrite(measurement.qc.overlayMidSliceRgb, overlayPath);
+    qcFiles.overlayPng = overlayPath;
+catch ME
+    warning('detecdivPomegranate:QcOverlayWriteFailed', ...
+        'Could not write QC overlay for ROI "%s": %s', safeId, ME.message);
+end
+
+try
+    rawRgb = repmat(normalizeToUint8(measurement.qc.rawMidSlice), 1, 1, 3);
+    reconMidRgb = maskToRgb(measurement.qc.midReconstructionMask, [255 128 0]);
+    reconDepthRgb = depthProjectionRgb(measurement, recon);
+    summary = tileRgbImages({rawRgb, measurement.qc.overlayMidSliceRgb, reconMidRgb, reconDepthRgb}, 8);
+    imwrite(summary, summaryPath);
+    qcFiles.summaryPng = summaryPath;
+catch ME
+    warning('detecdivPomegranate:QcSummaryWriteFailed', ...
+        'Could not write QC summary for ROI "%s": %s', safeId, ME.message);
+end
+end
+
+function rgb = maskToRgb(mask, color)
+mask = logical(mask);
+rgb = zeros([size(mask), 3], 'uint8');
+for c = 1:3
+    plane = rgb(:, :, c);
+    plane(mask) = uint8(color(c));
+    rgb(:, :, c) = plane;
+end
+end
+
+function rgb = depthProjectionRgb(measurement, recon)
+areaBySlice = measurement.areaBySlice_px(:);
+nZ = numel(areaBySlice);
+if nargin < 2 || isempty(recon)
+    if isfield(measurement.qc, 'midReconstructionMask')
+        recon = measurement.qc.midReconstructionMask;
+    else
+        recon = false(1, 1, nZ);
+    end
+end
+if ndims(recon) < 3
+    recon = reshape(recon, size(recon, 1), size(recon, 2), 1);
+end
+[H, W, Z] = size(recon);
+rgb = zeros(H, W, 3, 'uint8');
+if ~any(recon(:))
+    return;
+end
+depth = zeros(H, W);
+cover = false(H, W);
+for z = 1:Z
+    pix = recon(:, :, z);
+    depth(pix) = z;
+    cover = cover | pix;
+end
+if Z <= 1
+    hue = zeros(H, W);
+else
+    hue = (depth - 1) ./ max(1, Z - 1);
+end
+value = double(cover);
+sat = double(cover);
+rgbD = hsv2rgb(cat(3, hue, sat, value));
+rgb = uint8(round(255 * rgbD));
+if isempty(areaBySlice)
+    return;
+end
+end
+
+function out = tileRgbImages(images, gap)
+if nargin < 2 || isempty(gap), gap = 6; end
+valid = ~cellfun(@isempty, images);
+images = images(valid);
+if isempty(images)
+    out = zeros(1, 1, 3, 'uint8');
+    return;
+end
+H = max(cellfun(@(x) size(x, 1), images));
+W = max(cellfun(@(x) size(x, 2), images));
+for i = 1:numel(images)
+    images{i} = padOrResizeRgb(images{i}, H, W);
+end
+gapImg = uint8(255 * ones(H, gap, 3));
+out = images{1};
+for i = 2:numel(images)
+    out = cat(2, out, gapImg, images{i}); %#ok<AGROW>
+end
+end
+
+function rgb = padOrResizeRgb(rgb, H, W)
+if size(rgb, 3) == 1
+    rgb = repmat(rgb, 1, 1, 3);
+end
+rgb = uint8(rgb);
+h = size(rgb, 1);
+w = size(rgb, 2);
+canvas = uint8(255 * ones(H, W, 3));
+y0 = floor((H - h) / 2) + 1;
+x0 = floor((W - w) / 2) + 1;
+canvas(y0:y0+h-1, x0:x0+w-1, :) = rgb;
+rgb = canvas;
+end
+
 function out = outputDirFromContext(ctx)
 out = '';
 try
@@ -579,6 +705,8 @@ elseif iscell(values)
         item = values{i};
         if iscell(item)
             names = [names normalizeChannelSet(item)]; %#ok<AGROW>
+        elseif ischar(item) || (isstring(item) && isscalar(item))
+            names{end+1} = char(string(item)); %#ok<AGROW>
         else
             names = [names cellstr(string(item(:)))']; %#ok<AGROW>
         end

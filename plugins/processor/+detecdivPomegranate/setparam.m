@@ -47,6 +47,9 @@ tip{end+1} = 'STATIC: write one Pomegranate-compatible *_Results_Full.csv file p
 paramout.writeExcel = true;
 tip{end+1} = 'STATIC: write/update an Excel workbook with Pomegranate-compatible columns';
 
+paramout.writeQcImages = true;
+tip{end+1} = 'STATIC: write PNG QC images in each ROI folder';
+
 paramout.experimentName = '';
 tip{end+1} = 'STATIC: experiment name written in the Pomegranate-compatible output table';
 
