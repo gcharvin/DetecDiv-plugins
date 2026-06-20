@@ -59,7 +59,7 @@ tip{end+1} = 'OUTPUT artifact: PNG mosaic collecting all processed ROI QC tiles'
 paramout.experimentName = '';
 tip{end+1} = 'STATIC: experiment name written in the Pomegranate-compatible output table';
 
-paramout.frameSelectionMode = {'first_septum_detected','max_score','manual_frame','first_valid_mask','first_septum_detected'};
+paramout.frameSelectionMode = {'max_valid_score','max_score','first_septum_detected','split_stop','manual_frame','first_valid_mask','max_valid_score'};
 tip{end+1} = 'STATIC: frame used for reconstruction and measurement';
 
 paramout.manualFrame = 1;

@@ -120,6 +120,15 @@ elseif ~isempty(scoreDs) && istable(scoreDs.data) && height(scoreDs.data) > 0
     tbl = scoreDs.data;
     frames = tableColumn(tbl, 'frame', (1:height(tbl))');
     switch mode
+        case 'max_valid_score'
+            scores = tableColumn(tbl, 'septumScore', nan(height(tbl), 1));
+            trackValid = tableColumn(tbl, 'trackValid', true(height(tbl), 1));
+            valid = isfinite(scores) & logical(trackValid(:));
+            if any(valid)
+                [~, ii] = max(scores(valid));
+                jj = find(valid);
+                frame = frames(jj(ii));
+            end
         case 'max_score'
             scores = tableColumn(tbl, 'septumScore', nan(height(tbl), 1));
             valid = isfinite(scores);
@@ -127,6 +136,18 @@ elseif ~isempty(scoreDs) && istable(scoreDs.data) && height(scoreDs.data) > 0
                 [~, ii] = max(scores(valid));
                 jj = find(valid);
                 frame = frames(jj(ii));
+            end
+        case 'split_stop'
+            stopFrame = tableColumn(tbl, 'stopFrame', nan(height(tbl), 1));
+            validStop = isfinite(stopFrame);
+            if any(validStop)
+                frame = stopFrame(find(validStop, 1, 'first'));
+            else
+                splitFrame = tableColumn(tbl, 'splitFrameCandidate', nan(height(tbl), 1));
+                validSplit = isfinite(splitFrame);
+                if any(validSplit)
+                    frame = splitFrame(find(validSplit, 1, 'first')) - 1;
+                end
             end
         otherwise
             detected = tableColumn(tbl, 'septumDetected', false(height(tbl), 1));
