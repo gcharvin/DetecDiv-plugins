@@ -63,7 +63,7 @@ end
 cellInfoDs = buildCellInformationDataseries(paramout, roiobj, measurement);
 dataout = upsertDataseries(roiobj.data, cellInfoDs);
 roiobj.data = dataout;
-imageout = roiobj.image;
+imageout = [];
 
 paramout.measurementFrame = frame;
 paramout.midSlice = midSlice;
@@ -83,9 +83,11 @@ end
 
 function zNames = resolveZStackChannels(paramout, roiobj, maskName)
 zNames = normalizeChannelSet(paramout.zStackChannelNames);
+availableNames = cellstr(string(roiobj.display.channel(:)'));
+availableNames = availableNames(~cellfun(@isempty, availableNames));
+zNames = expandZStackChannelPatterns(zNames, availableNames);
 if isempty(zNames) || isAllSelector(zNames)
-    zNames = cellstr(string(roiobj.display.channel(:)'));
-    zNames = zNames(~cellfun(@isempty, zNames));
+    zNames = availableNames;
     drop = false(1, numel(zNames));
     for i = 1:numel(zNames)
         nm = lower(char(string(zNames{i})));
@@ -847,6 +849,70 @@ else
 end
 names = cellfun(@(x) strtrim(char(string(x))), names(:)', 'UniformOutput', false);
 names = unique(names(~cellfun(@isempty, names)), 'stable');
+end
+
+function names = expandZStackChannelPatterns(values, availableNames)
+names = normalizeChannelSet(values);
+availableNames = normalizeChannelSet(availableNames);
+if isempty(names) || isempty(availableNames)
+    return;
+end
+
+expanded = {};
+for i = 1:numel(names)
+    item = strtrim(char(string(names{i})));
+    if isZStackChannelPattern(item)
+        rx = zStackChannelPatternToRegexp(item);
+        matches = {};
+        for j = 1:numel(availableNames)
+            candidate = char(string(availableNames{j}));
+            if ~isempty(regexp(candidate, rx, 'once'))
+                matches{end+1} = candidate; %#ok<AGROW>
+            end
+        end
+        if ~isempty(matches)
+            expanded = [expanded matches]; %#ok<AGROW>
+        else
+            expanded{end+1} = item; %#ok<AGROW>
+        end
+    else
+        expanded{end+1} = item; %#ok<AGROW>
+    end
+end
+names = unique(expanded, 'stable');
+end
+
+function tf = isZStackChannelPattern(value)
+value = strtrim(char(string(value)));
+if isempty(value) || any(strcmpi(value, {'all','*',':','<all>','@source','@roi'}))
+    tf = false;
+    return;
+end
+tf = contains(value, '$') || contains(value, '#') || contains(value, '*');
+end
+
+function rx = zStackChannelPatternToRegexp(pat)
+pat = char(string(pat));
+rx = '^';
+i = 1;
+while i <= numel(pat)
+    ch = pat(i);
+    if ch == '$' || ch == '#'
+        j = i;
+        while j <= numel(pat) && (pat(j) == '$' || pat(j) == '#')
+            j = j + 1;
+        end
+        rx = [rx '\d{' num2str(j - i) '}']; %#ok<AGROW>
+        i = j;
+    elseif ch == '*'
+        rx = [rx '.*']; %#ok<AGROW>
+        i = i + 1;
+    else
+        rx = [rx regexptranslate('escape', ch)]; %#ok<AGROW>
+        i = i + 1;
+    end
+end
+rx = [rx '$'];
 end
 
 function tf = isAllSelector(values)
