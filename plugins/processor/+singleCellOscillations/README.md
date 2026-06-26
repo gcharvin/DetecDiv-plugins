@@ -38,18 +38,16 @@ The normalized cycles remain temporal because the scientific object is the time-
 
 ```matlab
 classification_data = 'div_1'
+labelVariable = 'div_1 / labels'
 fluorescence_data = 'channel_quantification'
-labelColumn = 'labels'
-fluorescenceColumn = 'Ratio_Mean_NoBckg_channel002_z001_channel001_z001_cyto'
+fluorescenceVariable = 'channel_quantification / Ratio_Mean_NoBckg_channel001_z001_channel002_z001_cyto'
 
-transitionFrom = 'large'
-transitionTo = 'small'
-frameStart = 25
-frameEnd = 167
 baselineMethod = 'moving_mean'
 baselineWindow = 50
 normFrames = 100
 interpolationMethod = 'linear'
 ```
+
+Frame selection is inherited from the global pipeline run options. Cycle boundaries are intentionally fixed to `large -> small`, and output artifacts, when enabled, are written in the project root.
 
 If the fluorescence column contains one vector per frame, as computeMetrics can produce for cell masks, `cellValueReducer` controls conversion to a scalar signal. The default is `mean`.

@@ -66,18 +66,17 @@ paramout = mergeStruct(defaults, param);
 
 paramout.classification_data = nonemptyChar(paramout.classification_data, 'div_1');
 paramout.fluorescence_data = nonemptyChar(paramout.fluorescence_data, 'channel_quantification');
-paramout.labelColumn = nonemptyChar(paramout.labelColumn, 'labels');
-paramout.fluorescenceColumn = nonemptyChar(paramout.fluorescenceColumn, '');
+legacyLabelColumn = optionalFieldChar(paramout, 'labelColumn', 'labels');
+legacyFluoColumn = optionalFieldChar(paramout, 'fluorescenceColumn', '');
+[paramout.classification_data, paramout.labelColumn] = parseDataSeriesVariableBinding( ...
+    optionalFieldChar(paramout, 'labelVariable', ''), paramout.classification_data, legacyLabelColumn);
+[paramout.fluorescence_data, paramout.fluorescenceColumn] = parseDataSeriesVariableBinding( ...
+    optionalFieldChar(paramout, 'fluorescenceVariable', ''), paramout.fluorescence_data, legacyFluoColumn);
+paramout.labelVariable = formatDataSeriesVariable(paramout.classification_data, paramout.labelColumn);
+paramout.fluorescenceVariable = formatDataSeriesVariable(paramout.fluorescence_data, paramout.fluorescenceColumn);
 paramout.cellValueReducer = validatestring(lower(nonemptyChar(paramout.cellValueReducer, 'mean')), ...
     {'mean','median','first','max','min'});
-
-paramout.frameStart = optionalPositiveInteger(paramout.frameStart);
-paramout.frameEnd = optionalPositiveInteger(paramout.frameEnd);
-paramout.framePeriod = numericScalar(paramout.framePeriod, 1);
-if paramout.framePeriod <= 0 || isnan(paramout.framePeriod)
-    paramout.framePeriod = 1;
-end
-paramout.timeUnit = validatestring(nonemptyChar(paramout.timeUnit, 'frames'), {'frames','s','min','h'});
+paramout.frames = normalizeFrameSelection(ctx);
 
 paramout.baselineMethod = validatestring(lower(nonemptyChar(paramout.baselineMethod, 'moving_mean')), ...
     {'moving_mean','moving_median','none'});
@@ -85,10 +84,6 @@ paramout.baselineWindow = max(1, round(numericScalar(paramout.baselineWindow, 50
 paramout.baselineEndpoints = validatestring(lower(nonemptyChar(paramout.baselineEndpoints, 'shrink')), ...
     {'shrink','fill','legacy_discard'});
 
-paramout.cycleBoundaryMode = validatestring(lower(nonemptyChar(paramout.cycleBoundaryMode, 'label_transition')), ...
-    {'label_transition'});
-paramout.transitionFrom = nonemptyChar(paramout.transitionFrom, 'large');
-paramout.transitionTo = nonemptyChar(paramout.transitionTo, 'small');
 paramout.minCycleLength = max(1, round(numericScalar(paramout.minCycleLength, 10)));
 paramout.maxCycleLength = max(paramout.minCycleLength, round(numericScalar(paramout.maxCycleLength, 200)));
 paramout.normFrames = max(2, round(numericScalar(paramout.normFrames, 100)));
@@ -100,12 +95,8 @@ paramout.traceOutputName = nonemptyChar(paramout.traceOutputName, 'osc_detrended
 paramout.normalizedCyclesOutputName = nonemptyChar(paramout.normalizedCyclesOutputName, 'osc_normalized_cycles');
 paramout.cycleMetadataOutputName = nonemptyChar(paramout.cycleMetadataOutputName, 'osc_cycle_metadata');
 paramout.writeArtifacts = logicalScalar(paramout.writeArtifacts, false);
-paramout.outputDir = nonemptyChar(paramout.outputDir, '');
-if isempty(paramout.outputDir)
-    paramout.outputDir = pwd;
-end
-paramout.workbookName = nonemptyChar(paramout.workbookName, 'single_cell_oscillations.xlsx');
-paramout.runId = resolveRunId(paramout, ctx);
+paramout.artifactRoot = resolveProjectRoot(ctx);
+paramout.artifactWorkbook = 'single_cell_oscillations.xlsx';
 paramout.verbose = logicalScalar(paramout.verbose, true);
 end
 
@@ -150,14 +141,7 @@ n = min(numel(labels), numel(rawFluo));
 labels = labels(1:n);
 rawFluo = rawFluo(1:n);
 sourceFrames = (1:n)';
-
-frameMask = true(n, 1);
-if ~isempty(opt.frameStart)
-    frameMask = frameMask & sourceFrames >= opt.frameStart;
-end
-if ~isempty(opt.frameEnd)
-    frameMask = frameMask & sourceFrames <= opt.frameEnd;
-end
+frameMask = frameMaskFromSelection(opt.frames, sourceFrames);
 if ~any(frameMask)
     status = "empty_frame_selection";
     return;
@@ -170,7 +154,7 @@ valid = frameMask & ~isnan(rawFluo) & ~isnan(detrended) & labels ~= "";
 sel = find(frameMask);
 traceTable = table( ...
     sourceFrames(sel), ...
-    (sourceFrames(sel) - 1) .* opt.framePeriod, ...
+    sourceFrames(sel), ...
     rawFluo(sel), ...
     baseline(sel), ...
     detrended(sel), ...
@@ -230,7 +214,7 @@ cycleIndexByFrame = zeros(size(frames));
 
 workIdx = find(frameMask);
 workLabels = labels(workIdx);
-transitionsLocal = find(workLabels(1:end-1) == string(opt.transitionFrom) & workLabels(2:end) == string(opt.transitionTo));
+transitionsLocal = find(workLabels(1:end-1) == "large" & workLabels(2:end) == "small");
 if isempty(transitionsLocal)
     return;
 end
@@ -269,7 +253,7 @@ for c = 1:(numel(transitions) - 1)
     values = detrended(idx);
     amp = max(values, [], 'omitnan') - min(values, [], 'omitnan');
     metaRows{c} = table(cycleIndex, frames(startIdx), frames(endIdx), cycleLength, ...
-        cycleLength .* opt.framePeriod, accepted, string(rejectReason), ...
+        cycleLength, accepted, string(rejectReason), ...
         mean(values, 'omitnan'), median(values, 'omitnan'), min(values, [], 'omitnan'), ...
         max(values, [], 'omitnan'), amp, trapz(values), ...
         'VariableNames', {'cycle_index','start_frame','end_frame','duration_frames','duration_time', ...
@@ -357,9 +341,19 @@ function [signal, ok] = extractFluorescence(ds, columnName, reducer)
 ok = false;
 signal = [];
 vars = string(ds.data.Properties.VariableNames);
-idx = find(strcmp(vars, columnName), 1);
-if isempty(idx)
+columnName = strtrim(string(columnName));
+idx = [];
+if strlength(columnName) > 0 && ~any(strcmpi(columnName, ["auto","<auto>"]))
+    idx = find(strcmp(vars, columnName), 1);
+end
+if isempty(idx) && strlength(columnName) > 0
     idx = find(contains(vars, columnName), 1);
+end
+if isempty(idx)
+    idx = find(contains(vars, "Ratio_Mean_NoBckg", 'IgnoreCase', true), 1);
+end
+if isempty(idx)
+    idx = firstReducibleVariable(ds.data);
 end
 if isempty(idx)
     return;
@@ -368,6 +362,22 @@ end
 col = ds.data.(char(vars(idx)));
 signal = reduceColumn(col, reducer);
 ok = true;
+end
+
+function idx = firstReducibleVariable(T)
+idx = [];
+vars = T.Properties.VariableNames;
+for i = 1:numel(vars)
+    name = string(vars{i});
+    if contains(name, "mask", 'IgnoreCase', true) || contains(name, "idx", 'IgnoreCase', true)
+        continue;
+    end
+    col = T.(vars{i});
+    if isnumeric(col) || islogical(col) || iscell(col)
+        idx = i;
+        return;
+    end
+end
 end
 
 function signal = reduceColumn(col, reducer)
@@ -466,19 +476,16 @@ ds.description = description;
 ds.userData = struct();
 ds.userData.processor = 'singleCellOscillations';
 ds.userData.status = char(status);
-ds.userData.runId = opt.runId;
 ds.userData.source = struct( ...
     'classification_data', opt.classification_data, ...
-    'fluorescence_data', opt.fluorescence_data, ...
+    'labelVariable', opt.labelVariable, ...
     'labelColumn', opt.labelColumn, ...
+    'fluorescence_data', opt.fluorescence_data, ...
+    'fluorescenceVariable', opt.fluorescenceVariable, ...
     'fluorescenceColumn', opt.fluorescenceColumn);
 ds.userData.parameters = struct( ...
-    'frameStart', opt.frameStart, ...
-    'frameEnd', opt.frameEnd, ...
     'baselineMethod', opt.baselineMethod, ...
     'baselineWindow', opt.baselineWindow, ...
-    'transitionFrom', opt.transitionFrom, ...
-    'transitionTo', opt.transitionTo, ...
     'normFrames', opt.normFrames);
 dataout(idx) = ds;
 end
@@ -518,15 +525,14 @@ spec = struct('plot', {plotFlags}, 'groups', {groups});
 end
 
 function writeArtifacts(opt, roiId, traceTable, normalizedTable, metadataTable)
-if exist(opt.outputDir, 'dir') ~= 7
-    mkdir(opt.outputDir);
+if exist(opt.artifactRoot, 'dir') ~= 7
+    mkdir(opt.artifactRoot);
 end
-safeRunId = matlab.lang.makeValidName(opt.runId);
 safeRoiId = matlab.lang.makeValidName(roiId);
-matPath = fullfile(opt.outputDir, [safeRunId '_' safeRoiId '_single_cell_oscillations.mat']);
+matPath = fullfile(opt.artifactRoot, [safeRoiId '_single_cell_oscillations.mat']);
 save(matPath, 'traceTable', 'normalizedTable', 'metadataTable');
 
-workbook = fullfile(opt.outputDir, opt.workbookName);
+workbook = fullfile(opt.artifactRoot, opt.artifactWorkbook);
 try
     writetable(traceTable, workbook, 'Sheet', sheetName(safeRoiId, 'trace'));
     writetable(normalizedTable, workbook, 'Sheet', sheetName(safeRoiId, 'cycles'));
@@ -589,33 +595,163 @@ catch
 end
 end
 
-function runId = resolveRunId(paramout, ctx)
-runId = '';
-if isfield(paramout, 'runId') && ~isempty(paramout.runId)
-    runId = char(string(paramout.runId));
-end
-if isempty(runId), runId = nestedChar(ctx, {'runId'}); end
-if isempty(runId), runId = nestedChar(ctx, {'run','runId'}); end
-if isempty(runId), runId = nestedChar(ctx, {'pipeline','runId'}); end
-if isempty(runId), runId = ['manual_' char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'))]; end
+function [seriesName, variableName] = parseDataSeriesVariableBinding(binding, fallbackSeries, fallbackVariable)
+seriesName = nonemptyChar(fallbackSeries, '');
+variableName = nonemptyChar(fallbackVariable, '');
+binding = nonemptyChar(binding, '');
+if isempty(binding) || any(strcmpi(binding, {'auto','<auto>'}))
+    return;
 end
 
-function value = nestedChar(s, path)
-value = '';
+parts = regexp(binding, '\s*/\s*', 'split');
+if numel(parts) >= 2
+    lhs = strtrim(parts{1});
+    rhs = strtrim(strjoin(parts(2:end), ' / '));
+    if ~isempty(lhs)
+        seriesName = lhs;
+    end
+    if ~isempty(rhs) && ~any(strcmpi(rhs, {'auto','<auto>'}))
+        variableName = rhs;
+    end
+else
+    variableName = strtrim(binding);
+end
+end
+
+function binding = formatDataSeriesVariable(seriesName, variableName)
+seriesName = nonemptyChar(seriesName, '');
+variableName = nonemptyChar(variableName, '');
+if isempty(seriesName)
+    binding = variableName;
+elseif isempty(variableName)
+    binding = seriesName;
+else
+    binding = [seriesName ' / ' variableName];
+end
+end
+
+function value = optionalFieldChar(s, name, fallback)
+value = fallback;
+if isstruct(s) && isfield(s, name)
+    value = nonemptyChar(s.(name), fallback);
+end
+end
+
+function frames = normalizeFrameSelection(ctx)
+frames = [];
+if ~isstruct(ctx)
+    return;
+end
+candidatePaths = { ...
+    {'frames'}, ...
+    {'run','frames'}, ...
+    {'selection','frames'}, ...
+    {'params','frames'}};
+for i = 1:numel(candidatePaths)
+    value = nestedValue(ctx, candidatePaths{i});
+    if ~isempty(value)
+        frames = parseFrames(value);
+        if ~isempty(frames)
+            return;
+        end
+    end
+end
+end
+
+function frameMask = frameMaskFromSelection(frames, sourceFrames)
+frameMask = true(numel(sourceFrames), 1);
+if isempty(frames)
+    return;
+end
+if islogical(frames)
+    frameMask = false(numel(sourceFrames), 1);
+    n = min(numel(frames), numel(sourceFrames));
+    frameMask(1:n) = frames(1:n);
+    return;
+end
+frames = double(frames(:));
+frames = frames(isfinite(frames) & frames >= 1);
+if isempty(frames)
+    return;
+end
+frameMask = ismember(sourceFrames, unique(round(frames)));
+end
+
+function frames = parseFrames(value)
+frames = [];
+if isnumeric(value) || islogical(value)
+    frames = value;
+    return;
+end
+if iscell(value) && ~isempty(value)
+    value = value{end};
+end
+txt = strtrim(char(string(value)));
+if isempty(txt) || any(strcmpi(txt, {'all','*'}))
+    return;
+end
+tokens = regexp(txt, '\d+\s*:\s*\d+|\d+', 'match');
+if isempty(tokens)
+    return;
+end
+acc = [];
+for i = 1:numel(tokens)
+    token = regexprep(tokens{i}, '\s+', '');
+    colon = strfind(token, ':');
+    if isempty(colon)
+        acc(end + 1) = str2double(token); %#ok<AGROW>
+    else
+        a = str2double(token(1:colon(1)-1));
+        b = str2double(token(colon(1)+1:end));
+        if isfinite(a) && isfinite(b)
+            acc = [acc a:b]; %#ok<AGROW>
+        end
+    end
+end
+frames = acc;
+end
+
+function root = resolveProjectRoot(ctx)
+root = pwd;
+if isstruct(ctx)
+    for path = {{'projectRoot'}, {'projectDir'}, {'projectPath'}, {'shallow','path'}, {'shallowObj','path'}}
+        value = nestedValue(ctx, path{1});
+        if ~isempty(value)
+            root = char(string(value));
+            if exist(root, 'file') == 2
+                root = fileparts(root);
+            end
+            if exist(root, 'dir') == 7
+                return;
+            end
+        end
+    end
+end
+end
+
+function value = nestedValue(s, path)
+value = [];
 try
     cur = s;
     for i = 1:numel(path)
         key = path{i};
-        if ~isstruct(cur) || ~isfield(cur, key)
+        if isstruct(cur)
+            if ~isfield(cur, key)
+                return;
+            end
+            cur = cur.(key);
+        elseif isobject(cur)
+            if ~isprop(cur, key)
+                return;
+            end
+            cur = cur.(key);
+        else
             return;
         end
-        cur = cur.(key);
     end
-    if ~isempty(cur)
-        value = char(string(cur));
-    end
+    value = cur;
 catch
-    value = '';
+    value = [];
 end
 end
 
@@ -659,18 +795,6 @@ else
 end
 if isempty(value) || ~isscalar(value) || ~isfinite(value)
     value = fallback;
-end
-end
-
-function value = optionalPositiveInteger(value)
-if isempty(value)
-    return;
-end
-value = numericScalar(value, NaN);
-if isnan(value) || value < 1
-    value = [];
-else
-    value = round(value);
 end
 end
 
