@@ -510,12 +510,16 @@ end
 function anchor = resolveAnchor(paramout)
 mode = lower(readChoiceLocal(paramout.anchorMode));
 switch mode
+    case 'right'
+        anchor = [0.70, 0.55];
     case 'left'
         anchor = [0.30, 0.55];
     case 'center'
         anchor = [0.50, 0.55];
-    otherwise
+    case 'custom'
         anchor = [scalarParam(paramout, 'anchorX', 0.70), scalarParam(paramout, 'anchorY', 0.55)];
+    otherwise
+        anchor = [0.70, 0.55];
 end
 anchor = max(0, min(1, anchor));
 end

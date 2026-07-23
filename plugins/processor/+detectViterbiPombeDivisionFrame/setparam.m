@@ -52,10 +52,10 @@ paramout.anchorMode = {'right','left','center','custom','right'};
 tip{end+1} = 'STATIC: initial cell selector in normalized ROI coordinates';
 
 paramout.anchorX = 0.70;
-tip{end+1} = 'STATIC: custom initial target X position in normalized ROI coordinates';
+tip{end+1} = 'STATIC: custom initial target X position in normalized ROI coordinates; used only when anchorMode is custom';
 
 paramout.anchorY = 0.55;
-tip{end+1} = 'STATIC: custom initial target Y position in normalized ROI coordinates';
+tip{end+1} = 'STATIC: custom initial target Y position in normalized ROI coordinates; used only when anchorMode is custom';
 
 paramout.anchorFrames = 4;
 tip{end+1} = 'STATIC: first frames where anchor position contributes to Viterbi cost';
