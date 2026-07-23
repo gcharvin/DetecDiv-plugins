@@ -52,7 +52,7 @@ measurement.source = struct( ...
     'focusSeries', nonemptyChar(paramout.focusSeriesName, 'DIC_focus_best_z'));
 measurement.qc = buildQc(midRaw, midMask, recon(:, :, midSlice), measurement);
 measurement.pomegranateResults = buildPomegranateResultsTable(measurement, stackFrame, recon, frame, midSlice, paramout);
-measurement.files = writePomegranateArtifacts(measurement.pomegranateResults, paramout, roiobj, ctx);
+measurement.files = writePomegranateArtifacts(measurement, paramout, roiobj, ctx);
 measurement.files.qc = writeQcArtifacts(measurement, paramout, roiobj, recon);
 if logicalParam(paramout, 'storeReconstructionMask', true)
     measurement.reconstructionMask = recon;
@@ -403,7 +403,7 @@ end
 tbl = vertcat(rows{:});
 end
 
-function files = writePomegranateArtifacts(tbl, paramout, roiobj, ctx)
+function files = writePomegranateArtifacts(measurement, paramout, roiobj, ctx)
 outputDir = nonemptyChar(paramout.outputDir, '');
 if isempty(outputDir)
     outputDir = outputDirFromContext(ctx);
@@ -415,8 +415,10 @@ if exist(outputDir, 'dir') ~= 7
     mkdir(outputDir);
 end
 safeId = matlab.lang.makeValidName(nonemptyChar(safeRoiId(roiobj), 'roi'));
+tbl = measurement.pomegranateResults;
 csvPath = '';
 workbookPath = '';
+detailSheet = '';
 if logicalParam(paramout, 'writeCsv', true)
     csvPath = fullfile(outputDir, [safeId '_Results_Full.csv']);
     writetable(tbl, csvPath);
@@ -424,13 +426,157 @@ end
 if logicalParam(paramout, 'writeExcel', true)
     workbookName = nonemptyChar(paramout.resultsWorkbookName, 'detecdiv_pomegranate_results.xlsx');
     workbookPath = fullfile(outputDir, workbookName);
-    try
-        writetable(tbl, workbookPath, 'Sheet', sheetName(safeId));
-    catch
-        writetable(tbl, workbookPath);
+    detailSheet = roiDetailSheetName(safeRoiId(roiobj));
+    writetable(tbl, workbookPath, 'Sheet', detailSheet, 'WriteMode', 'overwritesheet');
+
+    summaryRow = buildWorkbookSummaryRow(measurement, detailSheet, csvPath);
+    upsertWorkbookRow(workbookPath, 'summary', summaryRow, 'roiId');
+
+    parameterRow = buildWorkbookParameterRow(measurement, detailSheet);
+    upsertWorkbookRow(workbookPath, 'parameters', parameterRow, 'roiId');
+end
+files = struct('outputDir', outputDir, 'csvPath', csvPath, ...
+    'workbookPath', workbookPath, 'detailSheet', detailSheet, ...
+    'summarySheet', ternary(isempty(workbookPath), '', 'summary'), ...
+    'parametersSheet', ternary(isempty(workbookPath), '', 'parameters'));
+end
+
+function row = buildWorkbookSummaryRow(measurement, detailSheet, csvPath)
+source = measurement.source;
+zNames = string(strjoin(cellstr(string(measurement.zStackChannelNames(:))), ';'));
+row = table( ...
+    string(safeText(source.roiId, 'ROI')), string(detailSheet), ...
+    double(measurement.frame), double(measurement.midSlice), logical(measurement.valid), ...
+    double(numel(measurement.areaBySlice_px)), zNames, ...
+    string(safeText(source.maskChannel, '')), ...
+    string(safeText(source.scoreSeries, '')), string(safeText(source.focusSeries, '')), ...
+    double(measurement.voxelSizeXY_um), double(measurement.voxelSizeZ_um), ...
+    double(measurement.area_mid_px), double(measurement.area_mid_um2), ...
+    double(measurement.volume_voxels), double(measurement.volume_um3), ...
+    double(measurement.centroid_x_px), double(measurement.centroid_y_px), ...
+    double(measurement.majorAxis_px), double(measurement.minorAxis_px), ...
+    double(measurement.majorAxis_um), double(measurement.minorAxis_um), ...
+    double(measurement.orientation_deg), double(measurement.eccentricity), ...
+    double(measurement.solidity), logical(measurement.passesSolidityFilter), ...
+    double(measurement.perimeter_px), double(measurement.perimeter_um), ...
+    double(measurement.convexArea_px), ...
+    double(measurement.intensity_mid_mean), double(measurement.intensity_mid_median), ...
+    double(measurement.intensity_mid_std), double(measurement.intensity_mid_sum), ...
+    double(measurement.intensity_3d_mean), double(measurement.intensity_3d_median), ...
+    double(measurement.intensity_3d_std), double(measurement.intensity_3d_sum), ...
+    string(csvPath), ...
+    'VariableNames', {'roiId','detailSheet','frame','midSlice','valid', ...
+    'nZSlices','zStackChannels','maskChannel','scoreSeries','focusSeries', ...
+    'voxelSizeXY_um','voxelSizeZ_um','area_mid_px','area_mid_um2', ...
+    'volume_voxels','volume_um3','centroid_x_px','centroid_y_px', ...
+    'majorAxis_px','minorAxis_px','majorAxis_um','minorAxis_um', ...
+    'orientation_deg','eccentricity','solidity','passesSolidityFilter', ...
+    'perimeter_px','perimeter_um','convexArea_px', ...
+    'intensity_mid_mean','intensity_mid_median','intensity_mid_std','intensity_mid_sum', ...
+    'intensity_3d_mean','intensity_3d_median','intensity_3d_std','intensity_3d_sum', ...
+    'csvPath'});
+end
+
+function row = buildWorkbookParameterRow(measurement, detailSheet)
+p = measurement.parameters;
+row = table( ...
+    string(safeText(measurement.source.roiId, 'ROI')), string(detailSheet), ...
+    string(readChoiceField(p, 'frameSelectionMode', '')), ...
+    scalarParam(p, 'manualFrame', NaN), ...
+    scalarParam(p, 'voxelSizeXY', measurement.voxelSizeXY_um), ...
+    scalarParam(p, 'voxelSizeZ', measurement.voxelSizeZ_um), ...
+    scalarParamCompat(p, 'pomegranate_gapClosureSizePx', 'gapClosureSizePx', 10), ...
+    scalarParamCompat(p, 'pomegranate_bandCoverageRadiusPx', 'bandCoverageRadiusPx', 0), ...
+    scalarParamCompat(p, 'pomegranate_interpolationSmoothingPx', 'interpolationSmoothingPx', 5), ...
+    scalarParamCompat(p, 'pomegranate_solidityThreshold', 'solidityThreshold', 0.9), ...
+    scalarParamCompat(p, 'pomegranate_roiMarginPx', 'roiMarginPx', 10), ...
+    scalarParamCompat(p, 'pomegranate_segmentRadiusPaddingPx', 'reconstructionRadiusPaddingPx', 1), ...
+    scalarParamCompat(p, 'pomegranate_minSegmentRadiusPx', 'minSegmentRadiusPx', 1.5), ...
+    scalarParamCompat(p, 'pomegranate_skeletonPruneIterations', 'skeletonPruneIterations', 0), ...
+    logicalParam(p, 'storeReconstructionMask', true), ...
+    string(safeText(measurement.source.maskChannel, '')), ...
+    string(safeText(measurement.source.scoreSeries, '')), ...
+    string(safeText(measurement.source.focusSeries, '')), ...
+    string(strjoin(cellstr(string(measurement.zStackChannelNames(:))), ';')), ...
+    'VariableNames', {'roiId','detailSheet','frameSelectionMode','manualFrame', ...
+    'voxelSizeXY_um','voxelSizeZ_um','gapClosureSize_px','bandCoverageRadius_px', ...
+    'interpolationSmoothing_px','solidityThreshold','roiMargin_px', ...
+    'segmentRadiusPadding_px','minSegmentRadius_px','skeletonPruneIterations', ...
+    'storeReconstructionMask','maskChannel','scoreSeries','focusSeries','zStackChannels'});
+end
+
+function value = readChoiceField(s, fieldName, fallback)
+value = fallback;
+if isstruct(s) && isfield(s, fieldName) && ~isempty(s.(fieldName))
+    value = readChoiceLocal(s.(fieldName));
+end
+end
+
+function upsertWorkbookRow(workbookPath, sheet, newRow, keyName)
+combined = newRow;
+if exist(workbookPath, 'file') == 2 && workbookHasSheet(workbookPath, sheet)
+    old = readtable(workbookPath, 'Sheet', sheet, 'VariableNamingRule', 'preserve');
+    if ~isempty(old) && any(strcmp(old.Properties.VariableNames, keyName))
+        keep = string(old.(keyName)) ~= string(newRow.(keyName));
+        old = old(keep, :);
+        if isequal(old.Properties.VariableNames, newRow.Properties.VariableNames)
+            try
+                old = normalizeWorkbookColumnTypes(old, newRow);
+                combined = [old; newRow];
+            catch
+                warning('detecdivPomegranate:WorkbookSchemaReset', ...
+                    'Resetting sheet "%s" because its existing column types are incompatible.', sheet);
+            end
+        else
+            warning('detecdivPomegranate:WorkbookSchemaReset', ...
+                'Resetting sheet "%s" because its existing columns are obsolete.', sheet);
+        end
     end
 end
-files = struct('outputDir', outputDir, 'csvPath', csvPath, 'workbookPath', workbookPath);
+writetable(combined, workbookPath, 'Sheet', sheet, 'WriteMode', 'overwritesheet');
+end
+
+function old = normalizeWorkbookColumnTypes(old, model)
+for i = 1:numel(model.Properties.VariableNames)
+    name = model.Properties.VariableNames{i};
+    target = model.(name);
+    if isstring(target)
+        old.(name) = string(old.(name));
+    elseif islogical(target)
+        old.(name) = logical(old.(name));
+    elseif isnumeric(target)
+        old.(name) = double(old.(name));
+    end
+end
+end
+
+function tf = workbookHasSheet(workbookPath, target)
+tf = false;
+try
+    names = sheetnames(workbookPath);
+    tf = any(strcmpi(cellstr(string(names)), target));
+catch
+    try
+        [~, names] = xlsfinfo(workbookPath);
+        tf = any(strcmpi(names, target));
+    catch
+        tf = false;
+    end
+end
+end
+
+function name = roiDetailSheetName(raw)
+name = char(string(raw));
+name = regexprep(name, '[:\\/?*\[\]]', '_');
+name = strtrim(name);
+if isempty(name), name = 'roi'; end
+% Excel limits worksheet names to 31 characters. ROI identifiers generally
+% share a long prefix, so retain only the discriminating end of the name.
+name = name(max(1, numel(name) - 30):end);
+if any(strcmpi(name, {'summary','parameters'}))
+    name = ['roi_' name];
+    name = name(max(1, numel(name) - 30):end);
+end
 end
 
 function qcFiles = writeQcArtifacts(measurement, paramout, roiobj, recon)
@@ -1086,13 +1232,6 @@ catch
     txt = '';
 end
 if isempty(txt), txt = fallback; end
-end
-
-function name = sheetName(raw)
-name = char(string(raw));
-name = regexprep(name, '[:\\/?*\[\]]', '_');
-if isempty(name), name = 'roi'; end
-name = name(1:min(31, numel(name)));
 end
 
 function id = safeRoiId(roiobj)
