@@ -2,7 +2,9 @@ function spec = executionSpec()
 % detectViterbiPombeDivisionFrame.executionSpec  Pipeline contract.
 
 spec = struct();
-spec.summary = 'Tracks the pombe cell of interest by Viterbi and writes a mask plus septum profile/score dataseries.';
+spec.summary = ['Tracks the pombe cell of interest by Viterbi and writes a mask, ' ...
+    'septum profile/score dataseries, and an Excel workbook with one FOV sheet ' ...
+    'listing ROI division frames.'];
 
 spec.staticKeys = { ...
     ... % Main settings.

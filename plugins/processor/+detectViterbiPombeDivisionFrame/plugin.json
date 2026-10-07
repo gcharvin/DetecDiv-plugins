@@ -5,7 +5,7 @@
   "entrypoint": "detectViterbiPombeDivisionFrame.process",
   "setparam": "detectViterbiPombeDivisionFrame.setparam",
   "executionSpec": "detectViterbiPombeDivisionFrame.executionSpec",
-  "summary": "Tracks the pombe cell of interest by Viterbi and scores septum appearance from an intensity profile.",
+  "summary": "Tracks the pombe cell of interest by Viterbi, scores septum appearance, and writes an Excel workbook with ROI division frames grouped by FOV.",
   "detecdiv": {
     "minVersion": "0.8.0"
   }
