@@ -78,11 +78,11 @@ for k = 1:numel(frames)
     end
 end
 
-[profileMatrix, septumScore, septumPosition] = computeProfilesAndScores( ...
+[profileMatrix, septumScore, septumPosition, septumDiagnostics] = computeProfilesAndScores( ...
     rawStack, outMask, frames, paramout);
 
 [profileDs, scoreDs] = buildDataseries(paramout, roiobj, frames, profileMatrix, ...
-    septumScore, septumPosition, trackArea, trackValid, stopFrame, splitFrame, splitScore);
+    septumScore, septumPosition, trackArea, trackValid, stopFrame, splitFrame, splitScore, septumDiagnostics);
 
 paramout.trackFrames = frames;
 paramout.trackCandidateIndex = track(frames);
@@ -348,11 +348,13 @@ if ratio >= minRatio && ratio <= maxRatio
 end
 end
 
-function [profileMatrix, septumScore, septumPosition] = computeProfilesAndScores(rawStack, outMask, frames, paramout)
+function [profileMatrix, septumScore, septumPosition, diagnostics] = computeProfilesAndScores(rawStack, outMask, frames, paramout)
 nBins = max(10, round(scalarParam(paramout, 'profileBins', 100)));
 profileMatrix = nan(numel(frames), nBins);
 septumScore = nan(numel(frames), 1);
 septumPosition = nan(numel(frames), 1);
+diagnostics = emptySeptumDiagnostics(numel(frames));
+method = septumMethod(paramout);
 
 for k = 1:numel(frames)
     f = frames(k);
@@ -364,7 +366,36 @@ for k = 1:numel(frames)
     prof = longitudinalProfile(raw, mask, nBins);
     profNorm = normalizeProfile(prof);
     profileMatrix(k, :) = profNorm;
-    [septumScore(k), septumPosition(k)] = septumScoreFromProfile(profNorm, paramout);
+    [profileScore, profilePosition] = septumScoreFromProfile(profNorm, paramout);
+    diagnostics.profileScore(k) = profileScore;
+    if strcmp(method,'transverse2d')
+        [septumScore(k), septumPosition(k), info] = ...
+            detectViterbiPombeDivisionFrame.scoreTransverseSeptum(raw,mask,paramout);
+        diagnostics.coverage(k) = info.coverage;
+        diagnostics.angle(k) = info.angle;
+        diagnostics.flankOffset(k) = info.flankOffset;
+        diagnostics.noiseScale(k) = info.noiseScale;
+        diagnostics.endpoints(k,:) = reshape(info.lineEndpoints.',1,4);
+    else
+        septumScore(k) = profileScore;
+        septumPosition(k) = profilePosition;
+    end
+end
+end
+
+function diagnostics = emptySeptumDiagnostics(n)
+diagnostics = struct('profileScore',nan(n,1),'coverage',nan(n,1), ...
+    'angle',nan(n,1),'flankOffset',nan(n,1),'noiseScale',nan(n,1),'endpoints',nan(n,4));
+end
+
+function method = septumMethod(param)
+method = 'profile';
+if isfield(param,'septumMethod') && ~isempty(param.septumMethod)
+    method = lower(readChoiceLocal(param.septumMethod));
+end
+if ~any(strcmp(method,{'profile','transverse2d'}))
+    error('detectViterbiPombeDivisionFrame:SeptumMethod', ...
+        'Unknown septum method "%s". Choose profile or transverse2d.',method);
 end
 end
 
@@ -453,7 +484,9 @@ trackValid = false(numel(frames), 1);
     septumScore, septumPosition, trackArea, trackValid, [], [], 0);
 end
 
-function [profileDs, scoreDs] = buildDataseries(paramout, roiobj, frames, profileMatrix, septumScore, septumPosition, trackArea, trackValid, stopFrame, splitFrame, splitScore)
+function [profileDs, scoreDs] = buildDataseries(paramout, roiobj, frames, profileMatrix, septumScore, septumPosition, trackArea, trackValid, stopFrame, splitFrame, splitScore, diagnostics)
+if nargin < 12, diagnostics = emptySeptumDiagnostics(numel(frames)); end
+method = septumMethod(paramout);
 nBins = size(profileMatrix, 2);
 varNames = arrayfun(@(i) sprintf('p%03d', i), 1:nBins, 'UniformOutput', false);
 profileTable = array2table(profileMatrix, 'VariableNames', varNames);
@@ -464,7 +497,21 @@ profileDs.userData = struct('frames', frames, 'bins', nBins, ...
     'inputInstanceChannel', readChoiceLocal(paramout.instanceChannelName), ...
     'inputRawChannel', readChoiceLocal(paramout.rawChannelName), ...
     'outputMaskChannel', char(string(paramout.outputMaskChannelName)), ...
-    'septumScoreThreshold', scalarParam(paramout, 'septumScoreThreshold', 1.5));
+    'septumScoreThreshold', scalarParam(paramout, 'septumScoreThreshold', 1.5), ...
+    'septumMethod',method);
+if strcmp(method,'transverse2d')
+    profileDs.userData.septumDetector = struct( ...
+        'version','transverse2d.v1', ...
+        'edgeFraction',scalarParam(paramout,'septumLineEdgeFraction',0.2), ...
+        'minCoverage',scalarParam(paramout,'septumLineMinCoverage',0.65), ...
+        'maxAngle',scalarParam(paramout,'septumLineMaxAngle',30), ...
+        'minAspectRatio',scalarParam(paramout,'septumMinAspectRatio',1.3));
+    if isfield(paramout,'septumLineFlankOffsets')
+        profileDs.userData.septumDetector.flankOffsets = paramout.septumLineFlankOffsets;
+    else
+        profileDs.userData.septumDetector.flankOffsets = [3 5 7];
+    end
+end
 
 splitFrameCol = nan(numel(frames), 1);
 if ~isempty(splitFrame)
@@ -479,9 +526,16 @@ septumDetected = septumScore(:) >= threshold & logical(trackValid(:));
 scoreTable = table(frames(:), septumScore(:), septumPosition(:), trackArea(:), ...
     logical(trackValid(:)), septumDetected(:), stopFrameCol, splitFrameCol, repmat(splitScore, numel(frames), 1), ...
     'VariableNames', {'frame','septumScore','septumPosition','trackArea','trackValid','septumDetected','stopFrame','splitFrameCandidate','splitScore'});
+if strcmp(method,'transverse2d')
+    extra = array2table([diagnostics.profileScore,diagnostics.coverage, ...
+        diagnostics.angle,diagnostics.flankOffset,diagnostics.noiseScale,diagnostics.endpoints], ...
+        'VariableNames',{'septumProfileScore','septumLineCoverage','septumLineAngle', ...
+        'septumLineFlankOffset','septumNoiseScale','septumLineX1','septumLineY1','septumLineX2','septumLineY2'});
+    scoreTable = [scoreTable extra];
+end
 scoreDs = dataseries(scoreTable, {}, 'class', 'processing', 'type', 'temporal', ...
     'groupid', char(string(paramout.scoreSeriesName)), 'parentid', safeRoiId(roiobj));
-scoreDs.description = 'Frame-wise septum score from normalized pombe cell intensity profile';
+scoreDs.description = ['Frame-wise septum score using ' method];
 scoreDs.userData = profileDs.userData;
 end
 

@@ -103,11 +103,29 @@ paramout.stopAtSplit = true;
 tip{end+1} = 'STATIC: zero output mask after detected split frame';
 
 % Static profile/septum parameters.
+paramout.septumMethod = {'profile','transverse2d','transverse2d'};
+tip{end+1} = 'STATIC: transverse2d searches for a coherent stripe in the image; profile uses the legacy longitudinal intensity minimum';
+
+paramout.septumLineEdgeFraction = 0.20;
+tip{end+1} = 'STATIC: transverse2d excludes this fraction at both longitudinal cell ends';
+
+paramout.septumLineMinCoverage = 0.65;
+tip{end+1} = 'STATIC: transverse2d requires both flanks and consistent contrast across this fraction of the cell width';
+
+paramout.septumLineMaxAngle = 30;
+tip{end+1} = 'STATIC: maximum stripe tilt in degrees relative to the transverse cell axis';
+
+paramout.septumLineFlankOffsets = [3 5 7];
+tip{end+1} = 'STATIC: flank distances in pixels searched by transverse2d';
+
+paramout.septumMinAspectRatio = 1.3;
+tip{end+1} = 'STATIC: transverse2d ignores round objects below this longitudinal-to-transverse extent ratio';
+
 paramout.profileBins = 100;
 tip{end+1} = 'STATIC: number of normalized longitudinal profile bins';
 
 paramout.profileSmoothBins = 3;
-tip{end+1} = 'STATIC: moving average smoothing window for profile and score';
+tip{end+1} = 'STATIC: moving average smoothing window for the legacy profile score';
 
 paramout.profileEdgeIgnoreFraction = 0.12;
 tip{end+1} = 'STATIC: fraction of both profile edges ignored for septum scoring';
@@ -116,7 +134,7 @@ paramout.septumPolarity = {'dark','bright','absolute','dark'};
 tip{end+1} = 'STATIC: septum contrast polarity in normalized profile';
 
 paramout.septumScoreThreshold = 1.5;
-tip{end+1} = 'STATIC: septum is detected when septumScore is above this robust-normalized threshold';
+tip{end+1} = 'STATIC: detection threshold; profile uses profile IQR units, transverse2d uses local contrast/noise units';
 
 paramout.debug = false;
 tip{end+1} = 'STATIC: verbose diagnostic output';

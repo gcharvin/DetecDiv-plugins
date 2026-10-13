@@ -28,7 +28,8 @@ end
 
 % Export once, after the last ROI in the processor batch has received its
 % score dataseries. The exported division frame uses the default downstream
-% selection rule: the frame with the maximum finite score on a valid track.
+% selection rule for legacy profiles: maximum finite score on a valid track.
+% The 2-D detector additionally requires accepted septum evidence.
 if shouldExportDivisionFrameWorkbook(roiobj, ctx)
     paramout.divisionFramesWorkbookPath = writeDivisionFrameWorkbook( ...
         ctx, roiobj, paramout.scoreSeriesName);
@@ -130,12 +131,17 @@ for i = 1:numel(groups)
     rows = groups(i).rois;
     roiIds = strings(numel(rows), 1);
     divisionFrames = nan(numel(rows), 1);
+    appearanceFrames = nan(numel(rows), 1);
+    peakScores = nan(numel(rows), 1);
+    detectionStatus = strings(numel(rows), 1);
     for j = 1:numel(rows)
         roiIds(j) = string(rows(j).id);
-        divisionFrames(j) = maxValidScoreFrame(rows(j), scoreSeriesName);
+        [divisionFrames(j), appearanceFrames(j), peakScores(j), detectionStatus(j)] = ...
+            divisionFrameSummary(rows(j), scoreSeriesName);
     end
-    outputTable = table(roiIds, divisionFrames, ...
-        'VariableNames', {'ROI', 'DivisionFrame'});
+    outputTable = table(roiIds, divisionFrames, appearanceFrames, divisionFrames, peakScores, detectionStatus, ...
+        'VariableNames', {'ROI', 'DivisionFrame', 'SeptumAppearanceFrame', ...
+        'SeptumPeakFrame', 'SeptumPeakScore', 'DetectionStatus'});
     writetable(outputTable, workbookPath, 'Sheet', sheetName);
 end
 end
@@ -207,8 +213,11 @@ while any(strcmpi(sheetName, usedSheets))
 end
 end
 
-function frame = maxValidScoreFrame(roiobj, scoreSeriesName)
+function [frame, appearanceFrame, peakScore, status] = divisionFrameSummary(roiobj, scoreSeriesName)
 frame = NaN;
+appearanceFrame = NaN;
+peakScore = NaN;
+status = "missing_scores";
 try
     data = roiobj.data;
     if ~hasScoreSeries(data, scoreSeriesName)
@@ -233,10 +242,28 @@ try
             validTrack = true(size(scores));
         end
         valid = isfinite(scores) & validTrack;
+        frames = double(tbl.frame(:));
+        detected = false(size(valid));
+        if ismember('septumDetected',tbl.Properties.VariableNames)
+            detected = logical(tbl.septumDetected(:)) & valid;
+        end
+        if any(detected)
+            appearanceFrame = min(frames(detected));
+            status = "detected";
+        elseif any(valid)
+            status = "no_septum_detected";
+        else
+            status = "no_valid_track";
+        end
+        metadata = data(i).userData;
+        if isstruct(metadata) && isfield(metadata,'septumMethod') && ...
+                strcmp(char(string(metadata.septumMethod)),'transverse2d')
+            if ~ismember('septumDetected',tbl.Properties.VariableNames), return; end
+            valid = valid & detected;
+        end
         if any(valid)
-            frames = double(tbl.frame(:));
             validIdx = find(valid);
-            [~, bestIdx] = max(scores(valid));
+            [peakScore, bestIdx] = max(scores(valid));
             frame = frames(validIdx(bestIdx));
         end
         return;
@@ -260,6 +287,12 @@ end
 
 function paramout = normalizeParamLocal(param)
 paramout = param;
+% Existing pipeline snapshots retain their historical score semantics.
+% Newly configured nodes receive transverse2d from setparam; switching an
+% existing node requires selecting the method explicitly.
+if ~isfield(paramout,'septumMethod') || isempty(paramout.septumMethod)
+    paramout.septumMethod = 'profile';
+end
 defs = detectViterbiPombeDivisionFrame.setparam();
 fields = fieldnames(defs);
 for i = 1:numel(fields)
