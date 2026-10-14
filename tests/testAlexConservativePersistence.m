@@ -33,6 +33,15 @@ ctx = rmfield(ctx, 'sel');
 verifyEqual(testCase, saveCroppedImagesXConservative.selectedFrames(ctx), 1:20);
 end
 
+function testHistoricalBlockSizeIsOptionalAndValidated(testCase)
+verifyEmpty(testCase,saveCroppedImagesXConservative.blockSizeArguments(struct()));
+verifyEqual(testCase,saveCroppedImagesXConservative.blockSizeArguments(struct('cut',256)),{'cut',256});
+verifyError(testCase,@() saveCroppedImagesXConservative.blockSizeArguments(struct('cut',0)), ...
+    'saveCroppedImagesXConservative:InvalidBlockSize');
+verifyError(testCase,@() saveCroppedImagesXConservative.blockSizeArguments(struct('cut',[256 256])), ...
+    'saveCroppedImagesXConservative:InvalidBlockSize');
+end
+
 function testLegacyResultsRoundTripAndReplacement(testCase)
 r = fixtureRoi(testCase);
 r.results = expectedResults(1);
