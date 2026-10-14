@@ -33,6 +33,14 @@ ctx = rmfield(ctx, 'sel');
 verifyEqual(testCase, saveCroppedImagesXConservative.selectedFrames(ctx), 1:20);
 end
 
+function testMemoryPlannerAdaptsAndHonorsWorkerExhaustion(testCase)
+pixels=2048*2048; roiBytes=100*2^20;
+verifyEqual(testCase,saveCroppedImagesXConservative.planMemoryBlock(16*2^30,pixels,6,roiBytes,true,265,517),10);
+verifyEqual(testCase,saveCroppedImagesXConservative.planMemoryBlock(1100*2^20,pixels,6,roiBytes,true,265,517),1);
+verifyEqual(testCase,saveCroppedImagesXConservative.planMemoryBlock(800*2^20,pixels,6,roiBytes,true,265,517),0);
+verifyEqual(testCase,saveCroppedImagesXConservative.planMemoryBlock(16*2^30,pixels,6,roiBytes,true,2,517),2);
+end
+
 function testLegacyResultsRoundTripAndReplacement(testCase)
 r = fixtureRoi(testCase);
 r.results = expectedResults(1);
@@ -110,6 +118,11 @@ end
 end
 
 function testExtractionKeepsEarlierBlocksWithOldH5(testCase)
+% A small simulated worker budget forces 2-frame blocks to shrink to one,
+% so this also catches a fixed for-loop silently losing the extra blocks.
+previousLimit=getenv('DETECDIV_HUB_WORKER_MEMORY_LIMIT_MB');
+setenv('DETECDIV_HUB_WORKER_MEMORY_LIMIT_MB','4');
+memoryCleanup=onCleanup(@() setenv('DETECDIV_HUB_WORKER_MEMORY_LIMIT_MB',previousLimit)); %#ok<NASGU>
 settings = parallel.Settings;
 previous = settings.Pool.AutoCreate;
 settings.Pool.AutoCreate = false;
@@ -123,7 +136,7 @@ f.display.binning = ones(1,6); f.srcpath = repmat({raw}, 1,6);
 for c = 1:6
     for t = 1:5
         name = sprintf('c%d_t%d.tif', c,t);
-        imwrite(uint16((100*c+t)*ones(16)), fullfile(raw, name));
+        imwrite(uint16((100*c+t)*ones(256)), fullfile(raw, name));
         entry = dir(fullfile(raw, name));
         f.srclist{c}(t) = entry;
     end
