@@ -34,6 +34,8 @@ verifyEqual(testCase, saveCroppedImagesXConservative.selectedFrames(ctx), 1:20);
 end
 
 function testHistoricalBlockSizeIsOptionalAndValidated(testCase)
+defaults=saveCroppedImagesXConservative.setparam();
+verifyEqual(testCase,saveCroppedImagesXConservative.blockSizeArguments(defaults),{'cut',176});
 verifyEmpty(testCase,saveCroppedImagesXConservative.blockSizeArguments(struct()));
 verifyEqual(testCase,saveCroppedImagesXConservative.blockSizeArguments(struct('cut',256)),{'cut',256});
 verifyError(testCase,@() saveCroppedImagesXConservative.blockSizeArguments(struct('cut',0)), ...

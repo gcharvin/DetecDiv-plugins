@@ -14,7 +14,9 @@ tic;
 
 frames=[];
 fovid=1:numel(obj.fov); % All FOVs will be processed
-cut=20;
+% >>> ADAPTATION MEMOIRE 2026-10-14: bloc fixe pour un job de 24 Gio
+cut=176; % floor(2*265/3); la selection totale des frames reste independante
+% <<< FIN DE L'ADAPTATION MEMOIRE
 correctdrift=true;
 crashrecovery=0;
 cropDrift=1;

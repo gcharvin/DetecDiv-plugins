@@ -15,9 +15,13 @@ HDF5 contains only a short preview. Intermediate extraction blocks reload
 their own legacy MAT output, so an older HDF5 cannot overwrite earlier blocks.
 An optional pipeline `cut` parameter is forwarded to the existing historical
 argument of the same name. It limits frames per raw block, independently of
-the total run frame selection. Omitting it preserves the original 265-frame
-default. This adapter addition is marked `ADAPTATION PIPELINE 2026-10-14`;
-the historical script's memory behavior and scientific calculations are unchanged.
+the total run frame selection. The fixed default is now 176 frames per block
+(`floor(2*265/3)`) for the 24-GiB worker allocation. Both the pipeline parameter
+defaults and the legacy script use this value; all 517 frames are processed
+as 176 + 176 + 165. The legacy default-size change is marked
+`ADAPTATION MEMOIRE 2026-10-14`; allocations, cleanup, scientific calculations,
+and universal ROI saving are unchanged. The adapter forwarding code is marked
+`ADAPTATION PIPELINE 2026-10-14`.
 
 The function calls the bundled `computeDrift_X.m` helper through this package.
 It retains the original crash recovery, project save, output-file, and drift
