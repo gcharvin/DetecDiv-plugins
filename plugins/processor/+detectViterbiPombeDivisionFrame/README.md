@@ -59,3 +59,24 @@ produce a false positive; visual QC and independent movie validation remain
 necessary. Comparisons on the local `single_plane` and `new_project3`
 projects are not an independent acquisition validation: their image pixels
 in common areas are identical after alignment.
+
+## Automatic QC and runtime provenance (v0.2.1)
+
+Every completed processor batch writes `pombe_division_frames.xlsx` and
+one `pombe_septum_mosaic_<FOV>.png` per selected FOV in the run folder.
+Tiles use the first accepted septum frame, with the target-cell mask in
+orange and the other instance segmentations in light gray. There is no
+ellipse. Titles show onset and peak frames. Undetermined ROIs show an
+explicitly labeled reference frame, not an inferred division. A JSON
+sidecar records the actual frame and status of every tile.
+
+The workbook records `SeptumMethod` and `PluginVersion` for every ROI.
+Its `parameters` sheet records the actual process/core/detector paths from
+the saved dataseries. The console prints the effective method and output
+paths. These are runtime values, not the GUI's advertised default.
+
+To use the installed repository instead of a bundled plugin copy, update
+the Git checkout and run `detecdiv_pombe_septum_relink` from the repository
+root with the pipeline template path. It backs up the template, replaces
+the processor package roots, activates transverse2d, and updates stored
+node overrides in template run profiles. Then create a new pipelineRun.

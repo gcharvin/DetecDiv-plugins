@@ -16,6 +16,12 @@ end
 
 paramout = normalizeParamLocal(param);
 paramout = applyOutputNameFallback(paramout, ctx);
+if ~isfield(ctx,'progress') || ~isfield(ctx.progress,'localBase') || ctx.progress.localBase == 0
+    method = paramout.septumMethod;
+    if iscell(method), method = method{end}; end
+    fprintf('[detectViterbiPombeDivisionFrame] effective method=%s; process=%s; core=%s\n', ...
+        char(string(method)),mfilename('fullpath'),which('detectViterbiPombeDivisionFrame.core'));
+end
 
 frames = [];
 if isfield(ctx, 'frames') && ~isempty(ctx.frames)
@@ -31,8 +37,8 @@ end
 % selection rule for legacy profiles: maximum finite score on a valid track.
 % The 2-D detector additionally requires accepted septum evidence.
 if shouldExportDivisionFrameWorkbook(roiobj, ctx)
-    paramout.divisionFramesWorkbookPath = writeDivisionFrameWorkbook( ...
-        ctx, roiobj, paramout.scoreSeriesName);
+    [paramout.divisionFramesWorkbookPath,paramout.septumMosaicPaths] = writeDivisionFrameWorkbook( ...
+        ctx, roiobj, paramout);
 end
 end
 
@@ -57,7 +63,9 @@ catch
 end
 end
 
-function workbookPath = writeDivisionFrameWorkbook(ctx, currentRoi, scoreSeriesName)
+function [workbookPath,mosaicPaths] = writeDivisionFrameWorkbook(ctx, currentRoi, param)
+scoreSeriesName = param.scoreSeriesName;
+mosaicPaths = {};
 fovList = [];
 try
     if isfield(ctx, 'fovList') && ~isempty(ctx.fovList)
@@ -108,7 +116,9 @@ for i = 1:numel(fovList)
             end
         end
     end
-    groups(end+1) = struct('id', fovId, 'rois', roiList(selected)); %#ok<AGROW>
+    if any(selected)
+        groups(end+1) = struct('id', fovId, 'rois', roiList(selected)); %#ok<AGROW>
+    end
 end
 
 if isempty(groups)
@@ -124,7 +134,8 @@ if exist(workbookPath, 'file') == 2
     delete(workbookPath);
 end
 
-usedSheets = {};
+usedSheets = {'parameters'};
+runtimeRows = {};
 for i = 1:numel(groups)
     sheetName = uniqueSheetName(groups(i).id, usedSheets);
     usedSheets{end+1} = sheetName; %#ok<AGROW>
@@ -134,16 +145,39 @@ for i = 1:numel(groups)
     appearanceFrames = nan(numel(rows), 1);
     peakScores = nan(numel(rows), 1);
     detectionStatus = strings(numel(rows), 1);
+    methods = strings(numel(rows),1);
+    versions = strings(numel(rows),1);
     for j = 1:numel(rows)
         roiIds(j) = string(rows(j).id);
         [divisionFrames(j), appearanceFrames(j), peakScores(j), detectionStatus(j)] = ...
             divisionFrameSummary(rows(j), scoreSeriesName);
+        ds = rows(j).data(strcmp({rows(j).data.groupid},char(string(scoreSeriesName))));
+        methods(j) = "unknown"; versions(j) = "unknown";
+        if ~isempty(ds) && isstruct(ds(1).userData)
+            info = ds(1).userData;
+            if isfield(info,'septumMethod'),methods(j)=string(info.septumMethod);end
+            if isfield(info,'processorRuntime')
+                rt=info.processorRuntime;versions(j)=string(rt.pluginVersion);
+                runtimeRows(end+1,:) = {char(string(rows(j).id)),rt.pluginVersion, ...
+                    char(methods(j)),rt.processPath,rt.corePath,rt.detectorPath}; %#ok<AGROW>
+            end
+        end
     end
-    outputTable = table(roiIds, divisionFrames, appearanceFrames, divisionFrames, peakScores, detectionStatus, ...
+    outputTable = table(roiIds, divisionFrames, appearanceFrames, divisionFrames, peakScores, detectionStatus, methods,versions, ...
         'VariableNames', {'ROI', 'DivisionFrame', 'SeptumAppearanceFrame', ...
-        'SeptumPeakFrame', 'SeptumPeakScore', 'DetectionStatus'});
+        'SeptumPeakFrame', 'SeptumPeakScore', 'DetectionStatus','SeptumMethod','PluginVersion'});
     writetable(outputTable, workbookPath, 'Sheet', sheetName);
+    mosaicFile = fullfile(outputDir,['pombe_septum_mosaic_' sheetName '.png']);
+    mosaicPaths{end+1} = detectViterbiPombeDivisionFrame.exportSeptumMosaic( ...
+        rows,outputTable,param,mosaicFile,groups(i).id); %#ok<AGROW>
+    fprintf('[detectViterbiPombeDivisionFrame] FOV=%s; mosaic=%s\n',groups(i).id,mosaicFile);
 end
+if ~isempty(runtimeRows)
+    runtimeTable = cell2table(runtimeRows,'VariableNames', ...
+        {'ROI','PluginVersion','EffectiveMethod','ProcessPath','CorePath','DetectorPath'});
+    writetable(runtimeTable,workbookPath,'Sheet','parameters');
+end
+fprintf('[detectViterbiPombeDivisionFrame] workbook=%s\n',workbookPath);
 end
 
 function outputDir = divisionFrameOutputDir(ctx, roiobj)
