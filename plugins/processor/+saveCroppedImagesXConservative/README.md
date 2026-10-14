@@ -17,10 +17,11 @@ it yet, before the legacy routine counts all frames. Intermediate extraction blo
 their own legacy MAT output, so an older HDF5 cannot overwrite earlier blocks.
 An optional pipeline `cut` parameter is forwarded to the existing historical
 argument of the same name. It limits frames per raw block, independently of
-the total run frame selection. The fixed default is now 176 frames per block
-(`floor(2*265/3)`) for the 24-GiB worker allocation. Both the pipeline parameter
+the total run frame selection. The fixed default is now 88 frames per block
+for the 24-GiB worker allocation, after the 176-frame run stalled under memory
+pressure. Both the pipeline parameter
 defaults and the legacy script use this value; all 517 frames are processed
-as 176 + 176 + 165. The legacy default-size change is marked
+as five 88-frame blocks plus a final 77-frame block. The legacy default-size change is marked
 `ADAPTATION MEMOIRE 2026-10-14`; allocations, cleanup, scientific calculations,
 and universal ROI saving are unchanged. The adapter forwarding code is marked
 `ADAPTATION PIPELINE 2026-10-14`.
