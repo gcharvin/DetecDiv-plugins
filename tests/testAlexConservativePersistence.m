@@ -44,6 +44,21 @@ verifyError(testCase,@() saveCroppedImagesXConservative.blockSizeArguments(struc
     'saveCroppedImagesXConservative:InvalidBlockSize');
 end
 
+function testAllFramesHydratesLightweightRawList(testCase)
+raw=fullfile(testCase.TestData.root,'lazy_raw'); mkdir(raw);
+f=fov(); f.id='lazy'; f.channel={'channel000_z000'};
+f.frames=3; f.interval=1; f.display.binning=1; f.srcpath={raw};
+for frame=1:3
+    name=sprintf('img_channel000_position000_time%09d_z000.tif',frame-1);
+    imwrite(uint16(frame*ones(8)),fullfile(raw,name));
+end
+p=shallow(); p.fov=f;
+verifyEmpty(testCase,f.srclist);
+saveCroppedImagesXConservative.prepareAllFrames(p,1);
+verifyEqual(testCase,numel(f.srclist{1}),3);
+verifyEqual(testCase,f.readImage(3,1),uint16(3*ones(8)));
+end
+
 function testLegacyResultsRoundTripAndReplacement(testCase)
 r = fixtureRoi(testCase);
 r.results = expectedResults(1);

@@ -29,6 +29,7 @@ frames = saveCroppedImagesXConservative.selectedFrames(ctx);
 blockArgs = saveCroppedImagesXConservative.blockSizeArguments(param);
 % <<< FIN DE L'ADAPTATION (le script historique reste inchange)
 if isempty(frames) || (isnumeric(frames) && all(frames == -1))
+    saveCroppedImagesXConservative.prepareAllFrames(shallowObj, fovIndices);
     saveCroppedImagesXConservative.saveCroppedImages_X(shallowObj, ...
         'fov', fovIndices, 'rois', roiIndices, blockArgs{:});
 else

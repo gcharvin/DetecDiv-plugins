@@ -11,7 +11,9 @@ other selections rather than changing the legacy behavior. Keep processor
 parallel execution disabled.
 
 An empty run frame selection means all raw frames even when an existing ROI
-HDF5 contains only a short preview. Intermediate extraction blocks reload
+HDF5 contains only a short preview. The adapter first hydrates channel 1's
+raw file list through `fov.readImage` if a lightweight project has not loaded
+it yet, before the legacy routine counts all frames. Intermediate extraction blocks reload
 their own legacy MAT output, so an older HDF5 cannot overwrite earlier blocks.
 An optional pipeline `cut` parameter is forwarded to the existing historical
 argument of the same name. It limits frames per raw block, independently of
