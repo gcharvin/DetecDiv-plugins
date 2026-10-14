@@ -1,0 +1,12 @@
+{
+  "name": "saveCroppedImagesXConservative",
+  "version": "0.1.1",
+  "type": "processor",
+  "entrypoint": "saveCroppedImagesXConservative.process",
+  "setparam": "saveCroppedImagesXConservative.setparam",
+  "executionSpec": "saveCroppedImagesXConservative.executionSpec",
+  "summary": "Legacy saveCroppedImages_X.m analysis with Hub selection adaptations and bundled computeDrift_X helper.",
+  "detecdiv": {
+    "minVersion": "0.8.0"
+  }
+}

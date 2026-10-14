@@ -1,0 +1,12 @@
+{
+  "name": "xtraFullChannelsConservative",
+  "version": "0.1.1",
+  "type": "processor",
+  "entrypoint": "xtraFullChannelsConservative.process",
+  "setparam": "xtraFullChannelsConservative.setparam",
+  "executionSpec": "xtraFullChannelsConservative.executionSpec",
+  "summary": "Legacy Xtra analysis with platform model paths and bundled original helper functions.",
+  "detecdiv": {
+    "minVersion": "0.8.0"
+  }
+}
