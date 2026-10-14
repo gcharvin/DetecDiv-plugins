@@ -216,50 +216,21 @@ X = struct;
         currentframe=[];
     end
 
-    % Re-plan memory at each block. A while loop also visits additional
-    % blocks when available worker RAM shrinks during a run.
-    ii=frstart;
-    while ii<=numel(framecell)
-        clear list; % Release the previous raw/corrected block before sizing.
+    for ii=frstart:numel(framecell) % loop on all blocks of frames on a given FOV
         nframes= framecell{ii};
 
 
         % list=cell(numel(nframes),numel(cha));
    
         im=tmpfov(i).readImage(1,1);
-
-        [available, memoryNote]=roiExtract.availableMemoryBytes();
-        roiPixels=max(arrayfun(@(r) double(r.value(3))*double(r.value(4)), ...
-            tmpfov(i).roi(roiIndicesFov)));
-        roiBytes=2*roiPixels*numel(tmpfov(i).channel)*numel(nframestot);
-        remaining=[framecell{ii:end}];
-        blockCount=saveCroppedImagesXConservative.planMemoryBlock(available, ...
-            double(size(im,1))*double(size(im,2)),numel(cha),roiBytes, ...
-            correctdrift,cut,numel(remaining));
-        if blockCount<1
-            error('saveCroppedImages_X:InsufficientWorkerMemory', ...
-                'Not enough worker RAM for one frame plus ROI/drift buffers. %s',memoryNote);
-        end
-        if blockCount<numel(nframes)
-            tail=cell(1,ceil(numel(remaining)/blockCount));
-            for b=1:numel(tail)
-                tail{b}=remaining((b-1)*blockCount+1:min(b*blockCount,numel(remaining)));
-            end
-            framecell=[framecell(1:ii-1),tail];
-            nframes=framecell{ii};
-        end
-        fprintf('[saveCroppedImages_X] RAM block: %d frames, %.1f MiB raw. %s\n', ...
-            numel(nframes),2*double(size(im,1))*double(size(im,2))*numel(cha)*numel(nframes)/2^20,memoryNote);
           
-        list=zeros(size(im,1),size(im,2),numel(cha),numel(nframes),'uint16');
+        list=uint16(zeros(size(im,1),size(im,2),numel(cha),numel(nframes)));
    
         % refframe=framecell{1}(1);
 
         disp(['Reading group of frames:  ' num2str(ii) ' / ' num2str(numel(framecell)) ]);
 
-        % Read in the client: additional MATLAB reader processes would
-        % consume the same worker RAM budget alongside the image buffers.
-        parfor (j=1:numel(nframes),0)
+        parfor j=1:numel(nframes) % read all images for all channels in this group
 
             disp(['Reading frame: ' num2str(j) ' / '  num2str(numel(nframes)) ' in group of frame : ' num2str(ii) ' / ' num2str(numel(framecell)) ' for FOV:  ' num2str(tmpfov(i).id)]);
 
@@ -368,7 +339,7 @@ X = struct;
             %             end
 
             if init==1
-                tmproi(l).image=zeros(rroi(4),rroi(3),numel(tmpfov(i).channel),numel(nframestot),'uint16');
+                tmproi(l).image=uint16(zeros(rroi(4),rroi(3),numel(tmpfov(i).channel),numel(nframestot)));
                 tmproi(l).display.channel={};
                 tmproi(l).display.frame=1;
                 tmproi(l).channelid=[];
@@ -449,8 +420,6 @@ X = struct;
             % fprintf([reverseStr, msg]);
             %  reverseStr = repmat(sprintf('\b'), 1, length(msg));
         end
-        clear list;
-        ii=ii+1;
     end
     % fprintf('\n');
 

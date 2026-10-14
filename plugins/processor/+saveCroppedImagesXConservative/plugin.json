@@ -1,6 +1,6 @@
 {
   "name": "saveCroppedImagesXConservative",
-  "version": "0.1.2",
+  "version": "0.1.1",
   "type": "processor",
   "entrypoint": "saveCroppedImagesXConservative.process",
   "setparam": "saveCroppedImagesXConservative.setparam",
