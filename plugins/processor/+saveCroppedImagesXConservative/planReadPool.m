@@ -6,12 +6,33 @@ if isfinite(environmentCpu) && environmentCpu >= 1
     cpuLimit = min(cpuLimit, floor(environmentCpu));
 end
 [available, note] = roiExtract.availableMemoryBytes();
-% Windows has no Linux service cgroup: subtract the client's current working
-% set from the inherited job cap before admitting extra MATLAB processes.
 memoryMB = str2double(getenv('DETECDIV_HUB_WORKER_MEMORY_LIMIT_MB'));
-if ispc && isfinite(memoryMB) && memoryMB > 0
+% The native Windows worker can have a larger static capacity than this job.
+% Hub starts MATLAB in its attempt directory. Only trust the payload whose
+% run ID matches this invocation; never consume another/manual run's file.
+allocation = matchingJobAllocation(ctx,param);
+if isfield(allocation,'cpu_cores') && allocation.cpu_cores >= 1
+    cpuLimit = min(cpuLimit,floor(double(allocation.cpu_cores)));
+end
+if isfield(allocation,'memory_mb') && allocation.memory_mb > 0
+    if isfinite(memoryMB) && memoryMB > 0
+        memoryMB = min(memoryMB,double(allocation.memory_mb));
+    else
+        memoryMB = double(allocation.memory_mb);
+    end
+end
+% Subtract the client from a static cap as well as respecting remaining
+% cgroup RAM. This matters on Windows, which has no Linux service cgroup.
+resident = 0;
+if ispc
     current = System.Diagnostics.Process.GetCurrentProcess();
-    available = min(available, 0.8*max(0, memoryMB*2^20-double(current.WorkingSet64)));
+    resident = double(current.WorkingSet64);
+else
+    token = regexp(fileread('/proc/self/status'),'(?m)^VmRSS:\s+(\d+)\s+kB','tokens','once');
+    if ~isempty(token), resident = str2double(token{1})*1024; end
+end
+if isfinite(memoryMB) && memoryMB > 0
+    available = min(available,0.8*max(0,memoryMB*2^20-resident));
 end
 args = saveCroppedImagesXConservative.blockSizeArguments(param);
 if isempty(args)
@@ -57,8 +78,28 @@ end
 plan = saveCroppedImagesXConservative.readPoolCapacity( ...
     cpuLimit,available,blockBytes,frameBytes,roiBytes,cachedBytes,driftBytes,frameCount);
 plan.memoryNote = note;
+plan.jobAllocation = allocation;
 fprintf(['[Alex extraction] Read-pool plan: CPU ceiling %d, usable RAM %.2f GiB, ' ...
     'client reserve %.2f GiB, %.2f GiB/read worker: admitted %d. %s\n'], ...
     plan.cpuLimit,available/2^30,plan.clientReserveBytes/2^30, ...
     plan.workerReserveBytes/2^30,plan.workers,note);
+end
+
+function allocation = matchingJobAllocation(ctx,param)
+allocation = struct(); runId = '';
+if isfield(param,'runId') && ~isempty(param.runId)
+    runId = char(string(param.runId));
+elseif isfield(ctx,'run') && isfield(ctx.run,'runId')
+    runId = char(string(ctx.run.runId));
+end
+file = fullfile(pwd,'pipeline_run_job.json');
+if isempty(runId) || ~isfile(file), return; end
+payload = jsondecode(fileread(file));
+if isfield(payload,'run_request') && isfield(payload.run_request,'run_id') && ...
+        strcmp(char(string(payload.run_request.run_id)),runId) && ...
+        isfield(payload,'x_hub_resource_allocation')
+    % jsondecode makes the leading underscore in the Python key a valid
+    % MATLAB field name: _hub_resource_allocation -> x_hub_resource_allocation.
+    allocation = payload.x_hub_resource_allocation;
+end
 end

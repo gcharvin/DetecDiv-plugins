@@ -14,7 +14,9 @@ The adapter explicitly opens a process pool before the historical frame-reading
 `parfor`, including when MATLAB `Pool.AutoCreate` is disabled. It uses the lower
 of the job CPU limit and MATLAB thread limit, then reduces process count to fit
 remaining job RAM (including cgroup limits), the raw block/crop/drift buffers,
-and each worker's MATLAB process and serialized image-cache overhead. The fixed
+and each worker's MATLAB process and serialized image-cache overhead. The
+matching Hub attempt payload also caps CPU/RAM admission when a Windows
+worker's static capacity is larger than this particular job's allocation. The fixed
 `cut=88` and all scientific calculations remain unchanged. Insufficient RAM or
 an incompatible existing pool is reported before extraction, never silently
 treated as parallel execution. Pool workers use one compute thread each.

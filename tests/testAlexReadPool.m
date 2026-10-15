@@ -78,6 +78,7 @@ parfor i = 1:8
     pids(i) = feature('getpid');
     pause(0.1);
 end
+
 verifyEqual(testCase,numel(unique(pids)),2);
 for i=1:8
     verifyEqual(testCase,images{i},uint16((101+mod(i-1,5))*ones(16)));
@@ -100,6 +101,26 @@ verifyTrue(testCase,isvalid(pool));
 clear guard
 verifyEmpty(testCase,gcp('nocreate'));
 verifyEqual(testCase,settings.Pool.AutoCreate,autoCreate);
+end
+
+function testMatchingHubJobCapsLargerWorkerCapacity(testCase)
+root = tempname;mkdir(root);
+previous = pwd;
+filesCleanup = onCleanup(@() restoreDirectoryAndRemove(previous,root)); %#ok<NASGU>
+[project,~] = fixture(root);
+cd(root);
+ctx = struct('sel',struct('frames',1:5),'run',struct('runId','allocated_run'));
+text = ['{"run_request":{"run_id":"allocated_run"},' ...
+    '"_hub_resource_allocation":{"cpu_cores":1,"memory_mb":8192}}'];
+fid=fopen('pipeline_run_job.json','w');fwrite(fid,text,'char');fclose(fid);
+plan=saveCroppedImagesXConservative.planReadPool(project,ctx,struct('cut',2),1);
+verifyEqual(testCase,plan.cpuLimit,1);
+verifyEqual(testCase,plan.workers,1);
+verifyLessThanOrEqual(testCase,plan.availableBytes,0.8*8192*2^20);
+ctx.run.runId='different_run';
+plan=saveCroppedImagesXConservative.planReadPool(project,ctx,struct('cut',2),1);
+verifyEqual(testCase,plan.cpuLimit,2);
+verifyEmpty(testCase,fieldnames(plan.jobAllocation));
 end
 
 function testOwnedPoolClosesWhenExtractionRaises(testCase)
@@ -134,4 +155,9 @@ end
 function removeFixture(root)
 assert(startsWith(root,tempdir,'IgnoreCase',true),'Unexpected cleanup path.');
 rmdir(root,'s');
+end
+
+function restoreDirectoryAndRemove(previous,root)
+cd(previous);
+removeFixture(root);
 end
