@@ -10,6 +10,19 @@ supports all frames or a prefix beginning at frame 1; the wrapper rejects
 other selections rather than changing the legacy behavior. Keep processor
 parallel execution disabled.
 
+The adapter explicitly opens a process pool before the historical frame-reading
+`parfor`, including when MATLAB `Pool.AutoCreate` is disabled. It uses the lower
+of the job CPU limit and MATLAB thread limit, then reduces process count to fit
+remaining job RAM (including cgroup limits), the raw block/crop/drift buffers,
+and each worker's MATLAB process and serialized image-cache overhead. The fixed
+`cut=88` and all scientific calculations remain unchanged. Insufficient RAM or
+an incompatible existing pool is reported before extraction, never silently
+treated as parallel execution. Pool workers use one compute thread each.
+The pool's actual PIDs/threads are logged; a pool created by the adapter is closed
+on success or failure. A compatible pre-existing pool is preserved. Global
+MATLAB preferences and the universal `roi.save` implementation are untouched.
+The wrapper code is highlighted `ADAPTATION PARALLEL POOL 2026-10-15`.
+
 An empty run frame selection means all raw frames even when an existing ROI
 HDF5 contains only a short preview. The adapter first hydrates channel 1's
 raw file list through `fov.readImage` if a lightweight project has not loaded
