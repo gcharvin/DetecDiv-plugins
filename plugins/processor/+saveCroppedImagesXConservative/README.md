@@ -25,6 +25,12 @@ on success or failure. A compatible pre-existing pool is preserved. Global
 MATLAB preferences and the universal `roi.save` implementation are untouched.
 The wrapper code is highlighted `ADAPTATION PARALLEL POOL 2026-10-15`.
 
+The execution contract declares `imagesToRoi`: dry-run validation projects the
+raw source channels through this processor to downstream analysis, including
+projects whose unextracted ROIs still show only `Channel 1`. This requires a
+DetecDiv validator supporting processor `imagesToRoi` transfers. The six-channel
+analysis requirement remains enforced; no acquisition names are hardcoded.
+
 An empty run frame selection means all raw frames even when an existing ROI
 HDF5 contains only a short preview. The adapter first hydrates channel 1's
 raw file list through `fov.readImage` if a lightweight project has not loaded
