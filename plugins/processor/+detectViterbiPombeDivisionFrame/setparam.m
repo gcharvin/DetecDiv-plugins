@@ -44,7 +44,21 @@ tip{end+1} = 'OUTPUT binding: dataseries name for 100-bin normalized intensity p
 paramout.scoreSeriesName = 'pombe_division_score';
 tip{end+1} = 'OUTPUT binding: dataseries name for frame-wise septum score';
 
-% Static Viterbi parameters.
+% Static target-selection and Viterbi parameters.
+paramout.targetSelectionMode = {'legacy_viterbi','locked_depth','legacy_viterbi'};
+tip{end+1} = 'Target policy: legacy_viterbi preserves saved runs; locked_depth initializes only in a configured trap-back region and never restarts on a neighbour';
+paramout.trapDepthDirection = {'right','left','up','down','right'};
+tip{end+1} = 'Direction from trap mouth toward its closed back in ROI image coordinates';
+paramout.targetMinDepth = .60;
+tip{end+1} = 'Minimum normalized ROI depth of the target centroid (0 mouth side, 1 back side); calibrate from the trap geometry, not from available cell masks';
+paramout.targetDepthMargin = .03;
+tip{end+1} = 'Initialization is ambiguous when the two deepest eligible centroids differ by less than this normalized depth';
+paramout.targetMinOverlap = .5;
+tip{end+1} = 'Minimum intersection divided by the larger mask area for locked identity matching';
+paramout.targetMatchMargin = .1;
+tip{end+1} = 'Minimum overlap-strength advantage over a second eligible identity match';
+paramout.targetRecoveryMaxGap = 2;
+tip{end+1} = 'Maximum missing frames before target loss becomes terminal; never reinitialize a different target';
 paramout.inputMode = {'auto','label','binary','auto'};
 tip{end+1} = 'STATIC: mask input interpretation: auto, label, or binary';
 
@@ -101,6 +115,18 @@ tip{end+1} = 'STATIC: maximum daughter combined area ratio';
 
 paramout.stopAtSplit = true;
 tip{end+1} = 'STATIC: zero output mask after detected split frame';
+
+paramout.segmentationMaxGapFrames = 0;
+tip{end+1} = 'STATIC: reject recoverable segmentation failures up to this many frames; 0 preserves legacy behavior, 2 is recommended for tolerant tracking';
+
+paramout.segmentationGapAreaRatio = 0.65;
+tip{end+1} = 'STATIC: abrupt area ratio below which to look for a short segmentation failure';
+
+paramout.segmentationRecoveryAreaRatio = 0.8;
+tip{end+1} = 'STATIC: minimum recovered area ratio; recovery also requires spatial overlap with the pre-gap cell';
+
+paramout.splitConfirmationFrames = 1;
+tip{end+1} = 'STATIC: consecutive observations required to confirm a split/area-loss stop; 1 preserves legacy behavior, 2 is recommended for tolerant tracking';
 
 % Static profile/septum parameters.
 paramout.septumMethod = {'profile','transverse2d','transverse2d'};

@@ -47,19 +47,37 @@ for f = frames
     candidates{f} = frameCandidates(lab, paramout);
 end
 
+targetMode=readChoiceLocal(fieldOr(paramout,'targetSelectionMode','legacy_viterbi'));
+if ~ismember(targetMode,{'legacy_viterbi','locked_depth'})
+    error('pombe:TargetSelectionMode','Unknown target selection mode: %s',targetMode);
+end
+targetDiagnostic=[];
+if strcmp(targetMode,'locked_depth')
+    [track,costs,bridgedGaps,targetDiagnostic]= ...
+        detectViterbiPombeDivisionFrame.trackLockedDepth(candidates,frames,[H W],paramout);
+end
 if all(cellfun(@isempty, candidates(frames)))
     warning('detectViterbiPombeDivisionFrame:NoCandidates', ...
         'No mask candidates found in "%s". Output will be empty.', instanceName);
     outMask = zeros(H, W, 1, T, 'uint16');
     [profileDs, scoreDs, paramout] = buildEmptyDataseries(paramout, roiobj, frames);
+    [profileDs, scoreDs] = addToleranceDiagnostics(profileDs, scoreDs, paramout, false(numel(frames),1), []);
+    [profileDs,scoreDs]=addTargetDiagnostics(profileDs,scoreDs,targetDiagnostic);
+    paramout.targetSelectionDiagnostic=targetDiagnostic;
     dataout = upsertDataseries(roiobj.data, [profileDs scoreDs]);
     [paramout, dataout, imageout] = writeOutput(roiobj, paramout, outMask, dataout);
     return;
 end
 
-anchor = resolveAnchor(paramout);
-[track, costs] = viterbiTrack(candidates, frames, anchor, [H W], paramout);
-[stopFrame, splitFrame, splitScore] = detectSplitStop(candidates, track, frames, paramout);
+if strcmp(targetMode,'legacy_viterbi')
+    anchor = resolveAnchor(paramout);
+    [track, costs, bridgedGaps] = viterbiTrack(candidates, frames, anchor, [H W], paramout);
+    [track, gapRejected] = rejectTransientSegmentation(candidates, track, frames, paramout);
+else
+    gapRejected=false(size(frames));
+end
+gapRejected = gapRejected | bridgedGaps;
+[stopFrame, splitFrame, splitScore, confirmedFrame] = detectSplitStop(candidates, track, frames, paramout);
 
 outMask = zeros(H, W, 1, T, 'uint16');
 trackArea = nan(numel(frames), 1);
@@ -83,6 +101,8 @@ end
 
 [profileDs, scoreDs] = buildDataseries(paramout, roiobj, frames, profileMatrix, ...
     septumScore, septumPosition, trackArea, trackValid, stopFrame, splitFrame, splitScore, septumDiagnostics);
+[profileDs, scoreDs] = addToleranceDiagnostics(profileDs, scoreDs, paramout, gapRejected, confirmedFrame);
+[profileDs,scoreDs]=addTargetDiagnostics(profileDs,scoreDs,targetDiagnostic);
 
 paramout.trackFrames = frames;
 paramout.trackCandidateIndex = track(frames);
@@ -90,6 +110,9 @@ paramout.viterbiCost = costs;
 paramout.stopFrame = stopFrame;
 paramout.splitFrameCandidate = splitFrame;
 paramout.splitScore = splitScore;
+paramout.segmentationGapRejectedFrames = frames(gapRejected);
+paramout.splitConfirmedFrame = confirmedFrame;
+paramout.targetSelectionDiagnostic=targetDiagnostic;
 paramout.inputChannelName = instanceName;
 paramout.rawChannelNameResolved = rawName;
 paramout.saveChannels = {char(string(paramout.outputMaskChannelName))};
@@ -101,6 +124,18 @@ end
 
 dataout = upsertDataseries(roiobj.data, [profileDs scoreDs]);
 [paramout, dataout, imageout] = writeOutput(roiobj, paramout, outMask, dataout);
+end
+
+function value=fieldOr(s,name,fallback)
+value=fallback;if isfield(s,name),value=s.(name);end
+end
+
+function [profileDs,scoreDs]=addTargetDiagnostics(profileDs,scoreDs,d)
+if isempty(d),return;end
+scoreDs.data.targetSelectionState=d.state;
+scoreDs.data.targetSourceLabel=d.sourceLabel;
+scoreDs.data.targetDepth=d.depth;
+profileDs.userData.targetSelection=d;scoreDs.userData.targetSelection=d;
 end
 
 function frames = normalizeFrames(frames, T)
@@ -181,12 +216,15 @@ vals(vals == 0) = [];
 if ~isempty(vals), label = vals(1); end
 end
 
-function [track, costsOut] = viterbiTrack(candidates, frames, anchor, imageSize, paramout)
+function [track, costsOut, bridgedGaps] = viterbiTrack(candidates, frames, anchor, imageSize, paramout)
 T = numel(candidates);
 track = zeros(1, T);
 costsOut = nan(1, numel(frames));
+bridgedGaps = false(numel(frames),1);
+maxGap = max(0,round(scalarParam(paramout,'segmentationMaxGapFrames',0)));
 dp = cell(1, T);
 back = cell(1, T);
+backFrame = cell(1,T);
 prevFrame = [];
 for k = 1:numel(frames)
     f = frames(k);
@@ -200,26 +238,42 @@ for k = 1:numel(frames)
 
     curCost = inf(1, n);
     curBack = zeros(1, n);
+    curBackFrame = zeros(1,n);
     for j = 1:n
         if isempty(prevFrame)
             curCost(j) = anchorCost(cand(j), anchor, imageSize, paramout, k);
             continue;
         end
-        prevCand = candidates{prevFrame};
-        prevCost = dp{prevFrame};
         bestCost = inf;
         bestIdx = 0;
-        for iPrev = 1:numel(prevCand)
-            stepCost = transitionCost(prevCand(iPrev), cand(j), paramout);
-            if isinf(stepCost), continue; end
-            totalCost = prevCost(iPrev) + stepCost + anchorCost(cand(j), anchor, imageSize, paramout, k);
-            if totalCost < bestCost
-                bestCost = totalCost;
-                bestIdx = iPrev;
+        bestFrame = 0;
+        predecessors=prevFrame;
+        if maxGap>0
+            predecessors=frames(max(1,k-maxGap-1):k-1);
+        end
+        for previous=predecessors
+            prevCand=candidates{previous};prevCost=dp{previous};
+            if isempty(prevCost),continue;end
+            gap=frames(k)-previous-1;
+            if maxGap>0 && (gap>maxGap || gap<0),continue;end
+            for iPrev = 1:numel(prevCand)
+                if maxGap>0 && gap>0 && ~canBridgeFailure(candidates,frames,previous,f,prevCand(iPrev),cand(j),paramout)
+                    continue;
+                end
+                stepCost = transitionCost(prevCand(iPrev), cand(j), paramout);
+                if isinf(stepCost), continue; end
+                penalty=0;if maxGap>0,penalty=.25*gap;end
+                totalCost = prevCost(iPrev) + stepCost + penalty + anchorCost(cand(j), anchor, imageSize, paramout, k);
+                if totalCost < bestCost
+                    bestCost = totalCost;
+                    bestIdx = iPrev;
+                    bestFrame = previous;
+                end
             end
         end
         curCost(j) = bestCost;
         curBack(j) = bestIdx;
+        curBackFrame(j) = bestFrame;
     end
     if all(isinf(curCost))
         for j = 1:n
@@ -228,6 +282,7 @@ for k = 1:numel(frames)
     end
     dp{f} = curCost;
     back{f} = curBack;
+    backFrame{f} = curBackFrame;
     prevFrame = f;
 end
 
@@ -235,6 +290,24 @@ validFrames = frames(~cellfun(@isempty, dp(frames)));
 if isempty(validFrames), return; end
 lastFrame = validFrames(end);
 [~, idx] = min(dp{lastFrame});
+if maxGap>0
+    f=lastFrame;
+    while f>0
+        track(f)=idx;costsOut(frames==f)=dp{f}(idx);
+        previous=backFrame{f}(idx);nextIdx=back{f}(idx);
+        if previous>0
+            between=find(frames>previous & frames<f);
+            bridgedGaps(between)=true;
+        else
+            % Preserve the existing independent-segment restart behavior.
+            earlier=validFrames(validFrames<f);
+            if isempty(earlier),break;end
+            previous=earlier(end);[~,nextIdx]=min(dp{previous});
+        end
+        f=previous;idx=nextIdx;
+    end
+    return;
+end
 for k = numel(validFrames):-1:1
     f = validFrames(k);
     track(f) = idx;
@@ -245,6 +318,23 @@ for k = numel(validFrames):-1:1
         [~, idx] = min(dp{prevF});
     end
 end
+end
+
+function ok=canBridgeFailure(candidates,frames,previous,current,a,b,p)
+ok=false;
+between=frames(frames>previous & frames<current);
+if numel(between)~=current-previous-1,return;end
+recovery=scalarParam(p,'segmentationRecoveryAreaRatio',.8);
+drop=scalarParam(p,'segmentationGapAreaRatio',.65);
+overlap=numel(intersect(a.PixelIdxList,b.PixelIdxList))/max(1,min(a.Area,b.Area));
+if b.Area<recovery*a.Area || overlap<.5,return;end
+for f=between
+    for c=candidates{f}
+        overlap=numel(intersect(a.PixelIdxList,c.PixelIdxList))/max(1,min(a.Area,c.Area));
+        if c.Area>=drop*a.Area && overlap>=.5,return;end
+    end
+end
+ok=true;
 end
 
 function cost = anchorCost(cand, anchor, imageSize, paramout, frameOrdinal)
@@ -282,10 +372,56 @@ uni = numel(union(pixA, pixB));
 if uni == 0, val = 0; else, val = inter / uni; end
 end
 
-function [stopFrame, splitFrame, splitScore] = detectSplitStop(candidates, track, frames, paramout)
+function [track, rejected] = rejectTransientSegmentation(candidates, track, frames, paramout)
+% Mark short, recoverable failures as missing observations, never as masks
+% copied from another frame. The original segmentation remains untouched.
+rejected = false(numel(frames),1);
+maxGap = max(0, round(scalarParam(paramout,'segmentationMaxGapFrames',0)));
+if maxGap == 0, return; end
+dropRatio = scalarParam(paramout,'segmentationGapAreaRatio',0.65);
+recoveryRatio = scalarParam(paramout,'segmentationRecoveryAreaRatio',0.8);
+if ~(dropRatio > 0 && dropRatio < recoveryRatio && recoveryRatio <= 1)
+    error('detectViterbiPombeDivisionFrame:GapParameters', ...
+        'Require 0 < segmentationGapAreaRatio < segmentationRecoveryAreaRatio <= 1.');
+end
+k = 2;
+while k <= numel(frames)
+    prevFrame = frames(k-1); prevIdx = track(prevFrame);
+    if prevIdx <= 0, k=k+1; continue; end
+    prev = candidates{prevFrame}(prevIdx);
+    curIdx = track(frames(k));
+    if curIdx > 0 && candidates{frames(k)}(curIdx).Area >= dropRatio*prev.Area
+        k=k+1; continue;
+    end
+    recovered = 0;
+    for j=k+1:min(numel(frames),k+maxGap)
+        % Tolerance counts acquired frames, not gaps in a sparse selection.
+        if frames(j)-prevFrame ~= j-k+1, break; end
+        idx = track(frames(j));
+        if idx <= 0, continue; end
+        next = candidates{frames(j)}(idx);
+        overlap = numel(intersect(prev.PixelIdxList,next.PixelIdxList)) / ...
+            max(1,min(prev.Area,next.Area));
+        if next.Area >= recoveryRatio*prev.Area && overlap >= 0.5
+            recovered=j; break;
+        end
+    end
+    if recovered > 0
+        rejected(k:recovered-1)=true;
+        track(frames(k:recovered-1))=0;
+        k=recovered;
+    else
+        k=k+1;
+    end
+end
+end
+
+function [stopFrame, splitFrame, splitScore, confirmedFrame] = detectSplitStop(candidates, track, frames, paramout)
 stopFrame = [];
 splitFrame = [];
 splitScore = 0;
+confirmedFrame = [];
+confirmation = max(1,round(scalarParam(paramout,'splitConfirmationFrames',1)));
 areas = nan(1, numel(frames));
 for k = 1:numel(frames)
     f = frames(k);
@@ -314,18 +450,60 @@ for k = max(2, minTrackFrames):numel(frames)
     dropTypical = double(cur.Area) / max(1, typicalArea);
     hasSplit = splitEvidence(prev, candidates{f}, paramout);
     if dropPrev < scalarParam(paramout, 'splitAreaDropRatio', 0.65) && hasSplit > 0
+        if ~confirmAreaLoss(candidates,track,frames,k,prev,paramout,confirmation,typicalArea,false)
+            continue;
+        end
         stopFrame = fPrev;
         splitFrame = f;
         splitScore = hasSplit;
+        confirmedFrame = frames(k+confirmation-1);
         return;
     end
     if dropTypical < scalarParam(paramout, 'hardAreaDropRatio', 0.45)
+        if ~confirmAreaLoss(candidates,track,frames,k,prev,paramout,confirmation,typicalArea,true)
+            continue;
+        end
         stopFrame = fPrev;
         splitFrame = f;
         splitScore = max(hasSplit, 0.5);
+        confirmedFrame = frames(k+confirmation-1);
         return;
     end
 end
+end
+
+function ok = confirmAreaLoss(candidates,track,frames,k,prev,p,count,typicalArea,hard)
+ok=false;
+last=k+count-1;
+if last > numel(frames), return; end
+for j=k:last
+    if frames(j)-frames(k) ~= j-k, return; end
+    idx=track(frames(j));
+    if idx<=0, return; end
+    cur=candidates{frames(j)}(idx);
+    if hard
+        if cur.Area >= scalarParam(p,'hardAreaDropRatio',0.45)*typicalArea, return; end
+    else
+        if cur.Area >= scalarParam(p,'splitAreaDropRatio',0.65)*prev.Area || ...
+                splitEvidence(prev,candidates{frames(j)},p)<=0, return; end
+    end
+end
+ok=true;
+end
+
+function [profileDs,scoreDs] = addToleranceDiagnostics(profileDs,scoreDs,p,rejected,confirmed)
+if scalarParam(p,'segmentationMaxGapFrames',0)<=0 && scalarParam(p,'splitConfirmationFrames',1)<=1
+    return;
+end
+scoreDs.data.segmentationGapRejected=logical(rejected(:));
+value=NaN; if ~isempty(confirmed), value=confirmed; end
+scoreDs.data.splitConfirmedFrame=repmat(value,height(scoreDs.data),1);
+settings=struct('maxGapFrames',scalarParam(p,'segmentationMaxGapFrames',0), ...
+    'gapAreaRatio',scalarParam(p,'segmentationGapAreaRatio',0.65), ...
+    'recoveryAreaRatio',scalarParam(p,'segmentationRecoveryAreaRatio',0.8), ...
+    'splitConfirmationFrames',scalarParam(p,'splitConfirmationFrames',1));
+profileDs.userData.trackingTolerance=settings;
+scoreDs.userData.trackingTolerance=settings;
 end
 
 function score = splitEvidence(prev, candNow, paramout)

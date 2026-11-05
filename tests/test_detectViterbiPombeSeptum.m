@@ -77,7 +77,7 @@ t = ds(strcmp({ds.groupid},p.scoreSeriesName)).data;
 verifyTrue(testCase,all(ismember({'septumProfileScore','septumLineCoverage','septumLineX1'},t.Properties.VariableNames)));
 verifyTrue(testCase,t.septumDetected(1));
 verifyEqual(testCase,ds(end).userData.septumMethod,'transverse2d');
-verifyEqual(testCase,ds(end).userData.processorRuntime.pluginVersion,'0.2.1');
+verifyEqual(testCase,ds(end).userData.processorRuntime.pluginVersion,'0.4.0');
 p = rmfield(p,'septumMethod');
 [~,legacy] = detectViterbiPombeDivisionFrame.core(p,r,1);
 p.septumMethod = 'profile';
@@ -98,7 +98,7 @@ verifyTrue(testCase,ismissing(t.DivisionFrame(1)));
 verifyTrue(testCase,ismissing(t.SeptumAppearanceFrame(1)));
 verifyEqual(testCase,string(t.DetectionStatus(1)),"no_septum_detected");
 verifyEqual(testCase,string(t.SeptumMethod(1)),"transverse2d");
-verifyEqual(testCase,string(t.PluginVersion(1)),"0.2.1");
+verifyEqual(testCase,string(t.PluginVersion(1)),"0.4.0");
 verifyTrue(testCase,isfile(fullfile(outputDir,'pombe_septum_mosaic_FOV.png')));
 qc=jsondecode(fileread(fullfile(outputDir,'pombe_septum_mosaic_FOV.png.json')));
 verifyEqual(testCase,qc.tiles.frame,1);
@@ -166,3 +166,5 @@ verifyEqual(testCase,updated.nodes.params.anchorX,.42);
 verifyEqual(testCase,updated.runProfiles.main.ctx.run.nodeParams.septum_1.septumMethod,'transverse2d');
 verifyTrue(testCase,contains(updated.nodes.customPackageRoot,testCase.TestData.pluginRoot));
 end
+
+
