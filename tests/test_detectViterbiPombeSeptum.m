@@ -166,5 +166,3 @@ verifyEqual(testCase,updated.nodes.params.anchorX,.42);
 verifyEqual(testCase,updated.runProfiles.main.ctx.run.nodeParams.septum_1.septumMethod,'transverse2d');
 verifyTrue(testCase,contains(updated.nodes.customPackageRoot,testCase.TestData.pluginRoot));
 end
-
-
