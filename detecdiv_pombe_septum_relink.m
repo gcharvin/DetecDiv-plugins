@@ -3,7 +3,20 @@ function [pipe, report] = detecdiv_pombe_septum_relink(pipelinePath, pluginRepoR
 % detecdiv_pombe_septum_relink('C:/path/to/pipeline/pipeline.json')
 % Saves a template backup. Does not change ROI data or old run records.
 if nargin<2 || isempty(pluginRepoRoot),pluginRepoRoot=fileparts(mfilename('fullpath'));end
-ip=inputParser;ip.addParameter('Register',true,@(x)islogical(x)&&isscalar(x));ip.parse(varargin{:});
+ip=inputParser;ip.addParameter('Register',true,@(x)islogical(x)&&isscalar(x));
+ip.addParameter('TrapBackDirection','',@(x)ischar(x)||(isstring(x)&&isscalar(x)));
+ip.addParameter('CavityBounds',[],@isnumeric);
+ip.addParameter('EnableFocusFilter',[],@(x)isempty(x)||(islogical(x)&&isscalar(x)));
+ip.addParameter('EnableBoundarySupport',[],@(x)isempty(x)||(islogical(x)&&isscalar(x)));
+ip.addParameter('OutputSuffix','',@(x)ischar(x)||(isstring(x)&&isscalar(x)));
+ip.parse(varargin{:});options=ip.Results;
+direction=lower(char(options.TrapBackDirection));bounds=options.CavityBounds;
+assert(isempty(direction)||ismember(direction,{'left','right','up','down'}),'pombe:RelinkDirection','Choose left, right, up or down from the raw trap geometry.');
+assert(isempty(direction)==isempty(bounds),'pombe:RelinkCalibration','Specify both TrapBackDirection and CavityBounds, or neither.');
+if ~isempty(bounds)
+    validateattributes(bounds,{'numeric'},{'vector','numel',4,'finite','nonnegative'});bounds=double(bounds(:)');
+    assert(all(bounds(3:4)>0)&&all(bounds(1:2)+bounds(3:4)<=1),'pombe:RelinkCalibration','CavityBounds must be normalized [x y width height] inside the ROI.');
+end
 if nargin<1 || isempty(pipelinePath)
     [file,folder]=uigetfile('*.json','Select the pipeline template to relink');
     if isequal(file,0),pipe=[];report=struct();return;end
@@ -19,6 +32,8 @@ if ip.Results.Register,detecdiv_plugins_register_root(pluginRepoRoot);end
 addpath(processorRoot,'-begin');
 clear('detectViterbiPombeDivisionFrame.process','detectViterbiPombeDivisionFrame.core', ...
     'detectViterbiPombeDivisionFrame.setparam','detectViterbiPombeDivisionFrame.executionSpec', ...
+    'detectViterbiPombeDivisionFrame.selectTrapBackCell','detectViterbiPombeDivisionFrame.scoreFocusQuality', ...
+    'detectViterbiPombeDivisionFrame.buildSeptumSupport', ...
     'detectViterbiPombeDivisionFrame.scoreTransverseSeptum','detectViterbiPombeDivisionFrame.exportSeptumMosaic');
 rehash;
 actual=which('detectViterbiPombeDivisionFrame.process');
@@ -34,12 +49,30 @@ templateFile=fullfile(pipe.path,'pipeline.json');
 backup=[templateFile '.before_plugin_relink_' datestr(now,'yyyymmdd_HHMMSSFFF')];
 copyfile(templateFile,backup);
 defaults=detectViterbiPombeDivisionFrame.setparam();
+overrides=struct();
 for i=find(selected)
     previous=pipe.nodes(i).params;p=defaults;fields=fieldnames(previous);
     for k=1:numel(fields)
         if ~strcmp(fields{k},'tip'),p.(fields{k})=previous.(fields{k});end
     end
     p.septumMethod='transverse2d';p.pkg='detectViterbiPombeDivisionFrame';
+    forced=struct('septumMethod','transverse2d');
+    if ~isempty(direction)
+        forced.targetSelectionMode='trap_back';forced.anchorMode=direction;
+        forced.targetCavityBounds=bounds;forced.stopAtSplit=false;
+    end
+    if ~isempty(options.EnableFocusFilter),forced.focusQualityEnabled=options.EnableFocusFilter;end
+    if ~isempty(options.EnableBoundarySupport),forced.septumBoundarySupportEnabled=options.EnableBoundarySupport;end
+    suffix=char(options.OutputSuffix);
+    if ~isempty(suffix)
+        for key={'outputMaskChannelName','profileSeriesName','scoreSeriesName'}
+            value=char(string(p.(key{1})));
+            if ~endsWith(value,suffix),value=[value suffix];end
+            forced.(key{1})=value;
+        end
+    end
+    keys=fieldnames(forced);for k=1:numel(keys),p.(keys{k})=forced.(keys{k});end
+    overrides.(pipe.nodes(i).id)=forced;
     if isfield(p,'customPackageRoot'),p.customPackageRoot=processorRoot;end
     if isfield(p,'customPackageDir'),p.customPackageDir=packageDir;end
     pipe.nodes(i).params=p;pipe.nodes(i).pkg=p.pkg;
@@ -48,16 +81,16 @@ for i=find(selected)
     pipe.nodes(i).customPackageLoadedAt=char(datetime('now'));
 end
 nodeIds={pipe.nodes(selected).id};
-pipe.runProfiles=updateOverrides(pipe.runProfiles,nodeIds,processorRoot,packageDir);
+pipe.runProfiles=updateOverrides(pipe.runProfiles,nodeIds,processorRoot,packageDir,overrides);
 pipelineSave(pipe,'Artifacts',false);
 metadata=jsondecode(fileread(fullfile(packageDir,'plugin.json')));
 report=struct('template',templateFile,'backup',backup,'pluginVersion',metadata.version, ...
-    'method','transverse2d','processPath',actual,'nodeIds',{nodeIds});
+    'method','transverse2d','processPath',actual,'nodeIds',{nodeIds},'appliedSettings',overrides);
 fprintf('Relinked %d node(s) to plugin v%s: %s\n',nnz(selected),metadata.version,actual);
 fprintf('Create a NEW pipelineRun from this template. Previous template: %s\n',backup);
 end
 
-function s=updateOverrides(s,nodeIds,root,packageDir)
+function s=updateOverrides(s,nodeIds,root,packageDir,overrides)
 if ~isstruct(s),return;end
 for ix=1:numel(s)
     if isfield(s(ix),'nodeParams') && isstruct(s(ix).nodeParams)
@@ -67,6 +100,8 @@ for ix=1:numel(s)
                 p=s(ix).nodeParams.(id);
                 if isstruct(p)
                     p.septumMethod='transverse2d';
+                    forced=overrides.(id);keys=fieldnames(forced);
+                    for k=1:numel(keys),p.(keys{k})=forced.(keys{k});end
                     if isfield(p,'customPackageRoot'),p.customPackageRoot=root;end
                     if isfield(p,'customPackageDir'),p.customPackageDir=packageDir;end
                     s(ix).nodeParams.(id)=p;
@@ -77,7 +112,7 @@ for ix=1:numel(s)
     fields=fieldnames(s(ix));
     for k=1:numel(fields)
         if ~strcmp(fields{k},'nodeParams') && isstruct(s(ix).(fields{k}))
-            s(ix).(fields{k})=updateOverrides(s(ix).(fields{k}),nodeIds,root,packageDir);
+            s(ix).(fields{k})=updateOverrides(s(ix).(fields{k}),nodeIds,root,packageDir,overrides);
         end
     end
 end

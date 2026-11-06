@@ -77,7 +77,7 @@ t = ds(strcmp({ds.groupid},p.scoreSeriesName)).data;
 verifyTrue(testCase,all(ismember({'septumProfileScore','septumLineCoverage','septumLineX1'},t.Properties.VariableNames)));
 verifyTrue(testCase,t.septumDetected(1));
 verifyEqual(testCase,ds(end).userData.septumMethod,'transverse2d');
-verifyEqual(testCase,ds(end).userData.processorRuntime.pluginVersion,'0.4.0');
+verifyEqual(testCase,ds(end).userData.processorRuntime.pluginVersion,'0.5.0');
 p = rmfield(p,'septumMethod');
 [~,legacy] = detectViterbiPombeDivisionFrame.core(p,r,1);
 p.septumMethod = 'profile';
@@ -98,7 +98,7 @@ verifyTrue(testCase,ismissing(t.DivisionFrame(1)));
 verifyTrue(testCase,ismissing(t.SeptumAppearanceFrame(1)));
 verifyEqual(testCase,string(t.DetectionStatus(1)),"no_septum_detected");
 verifyEqual(testCase,string(t.SeptumMethod(1)),"transverse2d");
-verifyEqual(testCase,string(t.PluginVersion(1)),"0.4.0");
+verifyEqual(testCase,string(t.PluginVersion(1)),"0.5.0");
 verifyTrue(testCase,isfile(fullfile(outputDir,'pombe_septum_mosaic_FOV.png')));
 qc=jsondecode(fileread(fullfile(outputDir,'pombe_septum_mosaic_FOV.png.json')));
 verifyEqual(testCase,qc.tiles.frame,1);
@@ -165,4 +165,28 @@ verifyEqual(testCase,updated.nodes.params.septumMethod,'transverse2d');
 verifyEqual(testCase,updated.nodes.params.anchorX,.42);
 verifyEqual(testCase,updated.runProfiles.main.ctx.run.nodeParams.septum_1.septumMethod,'transverse2d');
 verifyTrue(testCase,contains(updated.nodes.customPackageRoot,testCase.TestData.pluginRoot));
+end
+
+function testRelinkExplicitPilotSettingsReachSavedProfiles(testCase)
+outputDir=tempname;mkdir(outputDir);cleanup=onCleanup(@() cleanupWorkbook(outputDir)); %#ok<NASGU>
+pipe=pipelineConstruct(outputDir,'pilot',1);
+pipe.nodes=struct('id','septum_1','name','septum_1','type','processor','func','detectViterbiPombeDivisionFrame.process', ...
+    'pkg','detectViterbiPombeDivisionFrame','params',struct('anchorMode','right'), ...
+    'customPackageRoot','','customPackageDir','');
+pipe.runProfiles.main=struct('ctx',struct('run',struct('nodeParams',struct('septum_1',struct('anchorMode','right','focusQualityEnabled',false)))));
+pipelineSave(pipe,'Artifacts',false);
+[updated,info]=detecdiv_pombe_septum_relink(pipe.path,testCase.TestData.pluginRoot,'Register',false, ...
+    'TrapBackDirection','left','CavityBounds',[.24 .40 .60 .30], ...
+    'EnableFocusFilter',true,'EnableBoundarySupport',true,'OutputSuffix','_pombe050');
+p=updated.nodes.params;q=updated.runProfiles.main.ctx.run.nodeParams.septum_1;
+verifyEqual(testCase,p.targetSelectionMode,'trap_back');verifyEqual(testCase,p.anchorMode,'left');
+verifyTrue(testCase,p.focusQualityEnabled&&p.septumBoundarySupportEnabled);verifyFalse(testCase,p.stopAtSplit);
+verifyEqual(testCase,q.anchorMode,'left');verifyTrue(testCase,q.focusQualityEnabled&&q.septumBoundarySupportEnabled);
+verifyEqual(testCase,q.scoreSeriesName,p.scoreSeriesName);verifyTrue(testCase,endsWith(p.scoreSeriesName,'_pombe050'));verifyTrue(testCase,isfile(info.backup));
+[saved,msg]=pipelineLoad(pipe.path);verifyEmpty(testCase,msg);verifyTrue(testCase,saved.nodes.params.focusQualityEnabled);
+end
+
+function testRelinkRequiresCompleteCalibrationBeforeWriting(testCase)
+verifyError(testCase,@()detecdiv_pombe_septum_relink('not_a_template',testCase.TestData.pluginRoot, ...
+    'Register',false,'TrapBackDirection','left'),'pombe:RelinkCalibration');
 end

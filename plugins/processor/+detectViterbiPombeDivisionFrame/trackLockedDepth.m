@@ -8,6 +8,7 @@ depthMargin=setting(p,'targetDepthMargin',.03);
 overlapMin=setting(p,'targetMinOverlap',.5);
 matchMargin=setting(p,'targetMatchMargin',.1);
 maxGap=setting(p,'targetRecoveryMaxGap',2);
+qualityExcluded=setting(p,'qualityExcludedFrames',[]);
 validateattributes(floorDepth,{'numeric'},{'scalar','>=',0,'<=',1});
 validateattributes(depthMargin,{'numeric'},{'scalar','nonnegative','finite'});
 validateattributes(overlapMin,{'numeric'},{'scalar','positive','<=',1});
@@ -66,7 +67,7 @@ for k=1:numel(frames)
             end
         end
     else
-        if f-lastFrame-1>maxGap,lost=true;states(k)=4;continue;end
+        if sum(~ismember(lastFrame+1:f-1,qualityExcluded))>maxGap,lost=true;states(k)=4;continue;end
         strengths=zeros(size(eligible));
         for j=1:numel(eligible)
             current=cand(eligible(j));ratio=current.Area/previous.Area;
@@ -93,7 +94,7 @@ for k=1:numel(frames)
         states(k)=state;
         if ~isempty(previous)
             gaps(k)=true;
-            if f-lastFrame>maxGap,states(k)=4;lost=true;end
+            if sum(~ismember(lastFrame+1:f,qualityExcluded))>maxGap,states(k)=4;lost=true;end
         end
     end
 end

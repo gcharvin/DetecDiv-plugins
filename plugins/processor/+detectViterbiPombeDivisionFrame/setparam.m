@@ -34,6 +34,20 @@ tip{end+1} = 'INPUT binding: labeled CellposeSAM instance mask channel';
 paramout.rawChannelName = [choices {rawPreferred}];
 tip{end+1} = 'INPUT binding: raw/DIC image channel used for septum intensity profile';
 
+paramout.focusQualityEnabled = false;
+tip{end+1} = 'Exclude low-focus frames before tracking, split decisions and septum scoring; leave raw and input masks unchanged';
+paramout.focusDetailRatioThreshold = .5;
+tip{end+1} = 'Reject only when relative fine detail and trap-edge strength both fall below their thresholds';
+paramout.focusEdgeRatioThreshold = .92;
+tip{end+1} = 'Relative smoothed trap-edge strength, combined with focusDetailRatioThreshold';
+paramout.focusMinReferenceFrames = 5;
+tip{end+1} = 'Minimum informative frames for the within-movie reference; flat/nonfinite frames are always excluded';
+paramout.focusRegions = [.20 .23 .66 .18;.20 .70 .66 .15];
+tip{end+1} = 'Normalized [x y width height] rectangles on stable trap walls; calibrate for different ROI crops';
+
+paramout.septumBoundarySupportEnabled = false;
+tip{end+1} = 'At a recent split, score the interface of two observed daughter masks supported by their previous mother; abstain if a half is missing. Preserve the selected target mask.';
+
 % Explicit output bindings.
 paramout.outputMaskChannelName = 'cell_of_interest';
 tip{end+1} = 'OUTPUT binding: binary mask channel for the tracked cell of interest';
@@ -45,10 +59,16 @@ paramout.scoreSeriesName = 'pombe_division_score';
 tip{end+1} = 'OUTPUT binding: dataseries name for frame-wise septum score';
 
 % Static target-selection and Viterbi parameters.
-paramout.targetSelectionMode = {'legacy_viterbi','locked_depth','legacy_viterbi'};
-tip{end+1} = 'Target policy: legacy_viterbi preserves saved runs; locked_depth initializes only in a configured trap-back region and never restarts on a neighbour';
+paramout.targetSelectionMode = {'legacy_viterbi','locked_depth','trap_back','legacy_viterbi'};
+tip{end+1} = 'Target policy: legacy_viterbi preserves saved runs; locked_depth locks one identity; trap_back selects the resident at the calibrated back every frame and reports identity breaks separately';
 paramout.trapDepthDirection = {'right','left','up','down','right'};
-tip{end+1} = 'Direction from trap mouth toward its closed back in ROI image coordinates';
+tip{end+1} = 'Legacy locked_depth direction only; trap_back uses the existing anchorMode selector as its single orientation setting';
+paramout.targetCavityBounds = [];
+tip{end+1} = 'trap_back only: required normalized [x y width height] of the cavity, calibrated from the raw movie; excludes neighbouring cells outside the trap';
+paramout.targetBackFraction = .30;
+tip{end+1} = 'trap_back only: back fraction of the calibrated cavity that the cell pole must reach; its centre may lie farther toward the opening';
+paramout.targetMinCavityFraction = .5;
+tip{end+1} = 'trap_back only: minimum fraction of the cell mask inside the calibrated cavity';
 paramout.targetMinDepth = .60;
 tip{end+1} = 'Minimum normalized ROI depth of the target centroid (0 mouth side, 1 back side); calibrate from the trap geometry, not from available cell masks';
 paramout.targetDepthMargin = .03;
@@ -62,8 +82,8 @@ tip{end+1} = 'Maximum missing frames before target loss becomes terminal; never 
 paramout.inputMode = {'auto','label','binary','auto'};
 tip{end+1} = 'STATIC: mask input interpretation: auto, label, or binary';
 
-paramout.anchorMode = {'right','left','center','custom','right'};
-tip{end+1} = 'STATIC: initial cell selector in normalized ROI coordinates';
+paramout.anchorMode = {'right','left','up','down','center','custom','right'};
+tip{end+1} = 'Cell selector: trap_back uses left/right/up/down as the direction toward the closed back, for every frame; legacy modes use an initial anchor';
 
 paramout.anchorX = 0.70;
 tip{end+1} = 'STATIC: custom initial target X position in normalized ROI coordinates; used only when anchorMode is custom';

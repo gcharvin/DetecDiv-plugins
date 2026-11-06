@@ -37,24 +37,36 @@ maskStack = roiobj.image(:, :, instanceID, :);
 rawStack = roiobj.image(:, :, rawID, :);
 [H, W, ~, T] = size(maskStack);
 frames = normalizeFrames(frames, T);
+quality=[];trackingFrames=frames;trackingParam=paramout;
+if scalarParam(paramout,'focusQualityEnabled',0)>0
+    quality=detectViterbiPombeDivisionFrame.scoreFocusQuality(rawStack,paramout);
+    trackingFrames=frames(~quality.rejected(frames));
+    trackingParam.qualityExcludedFrames=find(quality.rejected)';
+    paramout.focusQualityDiagnostic=quality;
+    paramout.focusRejectedFrames=find(quality.rejected)';
+end
 
 inputMode = readChoiceLocal(paramout.inputMode);
 if isempty(inputMode), inputMode = 'auto'; end
 
 candidates = cell(1, T);
-for f = frames
+for f = trackingFrames
     lab = normalizeLabelFrame(maskStack(:, :, 1, f), inputMode);
     candidates{f} = frameCandidates(lab, paramout);
 end
 
 targetMode=readChoiceLocal(fieldOr(paramout,'targetSelectionMode','legacy_viterbi'));
-if ~ismember(targetMode,{'legacy_viterbi','locked_depth'})
+if ~ismember(targetMode,{'legacy_viterbi','locked_depth','trap_back'})
     error('pombe:TargetSelectionMode','Unknown target selection mode: %s',targetMode);
 end
 targetDiagnostic=[];
 if strcmp(targetMode,'locked_depth')
     [track,costs,bridgedGaps,targetDiagnostic]= ...
-        detectViterbiPombeDivisionFrame.trackLockedDepth(candidates,frames,[H W],paramout);
+        detectViterbiPombeDivisionFrame.trackLockedDepth(candidates,trackingFrames,[H W],trackingParam);
+end
+if strcmp(targetMode,'trap_back')
+    [track,costs,bridgedGaps,targetDiagnostic]= ...
+        detectViterbiPombeDivisionFrame.selectTrapBackCell(candidates,trackingFrames,[H W],trackingParam);
 end
 if all(cellfun(@isempty, candidates(frames)))
     warning('detectViterbiPombeDivisionFrame:NoCandidates', ...
@@ -62,29 +74,43 @@ if all(cellfun(@isempty, candidates(frames)))
     outMask = zeros(H, W, 1, T, 'uint16');
     [profileDs, scoreDs, paramout] = buildEmptyDataseries(paramout, roiobj, frames);
     [profileDs, scoreDs] = addToleranceDiagnostics(profileDs, scoreDs, paramout, false(numel(frames),1), []);
+    targetDiagnostic=expandTargetQuality(targetDiagnostic,trackingFrames,frames,quality);
     [profileDs,scoreDs]=addTargetDiagnostics(profileDs,scoreDs,targetDiagnostic);
+    [profileDs,scoreDs]=addFocusDiagnostics(profileDs,scoreDs,quality,frames);
+    if scalarParam(paramout,'septumBoundarySupportEnabled',0)>0
+        [supportMask,supportDiagnostic]=detectViterbiPombeDivisionFrame.buildSeptumSupport(outMask,candidates,frames,trackingParam);
+        [profileDs,scoreDs,paramout]=addSupportDiagnostics(profileDs,scoreDs,paramout,supportDiagnostic,scoreDs.data.septumScore);
+    end
     paramout.targetSelectionDiagnostic=targetDiagnostic;
     dataout = upsertDataseries(roiobj.data, [profileDs scoreDs]);
     [paramout, dataout, imageout] = writeOutput(roiobj, paramout, outMask, dataout);
+    if scalarParam(paramout,'septumBoundarySupportEnabled',0)>0
+        [paramout,imageout]=writeSupportOutput(roiobj,paramout,supportMask);
+    end
     return;
 end
 
 if strcmp(targetMode,'legacy_viterbi')
     anchor = resolveAnchor(paramout);
-    [track, costs, bridgedGaps] = viterbiTrack(candidates, frames, anchor, [H W], paramout);
-    [track, gapRejected] = rejectTransientSegmentation(candidates, track, frames, paramout);
+    [track, costs, bridgedGaps] = viterbiTrack(candidates, trackingFrames, anchor, [H W], trackingParam);
+    [track, gapRejected] = rejectTransientSegmentation(candidates, track, trackingFrames, trackingParam);
 else
-    gapRejected=false(size(frames));
+    gapRejected=false(size(trackingFrames));
 end
 gapRejected = gapRejected | bridgedGaps;
-[stopFrame, splitFrame, splitScore, confirmedFrame] = detectSplitStop(candidates, track, frames, paramout);
+[stopFrame, splitFrame, splitScore, confirmedFrame] = detectSplitStop(candidates, track, trackingFrames, paramout);
+if ~isempty(quality)
+    good=ismember(frames,trackingFrames);expanded=false(size(frames));expanded(good)=gapRejected;gapRejected=expanded;
+    expanded=nan(size(frames));expanded(good)=costs;costs=expanded;
+    targetDiagnostic=expandTargetQuality(targetDiagnostic,trackingFrames,frames,quality);
+end
 
 outMask = zeros(H, W, 1, T, 'uint16');
 trackArea = nan(numel(frames), 1);
 trackValid = false(numel(frames), 1);
 for k = 1:numel(frames)
     f = frames(k);
-    if paramout.stopAtSplit && ~isempty(stopFrame) && f > stopFrame
+    if paramout.stopAtSplit && ~strcmp(targetMode,'trap_back') && ~isempty(stopFrame) && f > stopFrame
         continue;
     end
     idx = track(f);
@@ -96,13 +122,22 @@ for k = 1:numel(frames)
     end
 end
 
+supportDiagnostic=[];supportMask=outMask;
+if scalarParam(paramout,'septumBoundarySupportEnabled',0)>0
+    [supportMask,supportDiagnostic]=detectViterbiPombeDivisionFrame.buildSeptumSupport(outMask,candidates,frames,trackingParam);
+end
 [profileMatrix, septumScore, septumPosition, septumDiagnostics] = computeProfilesAndScores( ...
-    rawStack, outMask, frames, paramout);
+    rawStack, supportMask, frames, paramout);
 
 [profileDs, scoreDs] = buildDataseries(paramout, roiobj, frames, profileMatrix, ...
     septumScore, septumPosition, trackArea, trackValid, stopFrame, splitFrame, splitScore, septumDiagnostics);
 [profileDs, scoreDs] = addToleranceDiagnostics(profileDs, scoreDs, paramout, gapRejected, confirmedFrame);
 [profileDs,scoreDs]=addTargetDiagnostics(profileDs,scoreDs,targetDiagnostic);
+[profileDs,scoreDs]=addFocusDiagnostics(profileDs,scoreDs,quality,frames);
+if ~isempty(supportDiagnostic)
+    [~,originalScore]=computeProfilesAndScores(rawStack,outMask,frames,paramout);
+    [profileDs,scoreDs,paramout]=addSupportDiagnostics(profileDs,scoreDs,paramout,supportDiagnostic,originalScore);
+end
 
 paramout.trackFrames = frames;
 paramout.trackCandidateIndex = track(frames);
@@ -124,10 +159,51 @@ end
 
 dataout = upsertDataseries(roiobj.data, [profileDs scoreDs]);
 [paramout, dataout, imageout] = writeOutput(roiobj, paramout, outMask, dataout);
+if ~isempty(supportDiagnostic)
+    [paramout,imageout]=writeSupportOutput(roiobj,paramout,supportMask);
+end
+end
+
+function [profileDs,scoreDs,p]=addSupportDiagnostics(profileDs,scoreDs,p,d,original)
+scoreDs.data.septumOriginalScore=original;
+scoreDs.data.septumScorable=d.scorable;scoreDs.data.septumSupportState=d.state;
+scoreDs.data.septumSupportParentFrame=d.parentFrame;
+scoreDs.data.septumSupportPartnerLabel=d.partnerLabel;
+scoreDs.userData.septumSupport=d;profileDs.userData.septumSupport=d;p.septumSupportDiagnostic=d;
+end
+function [p,imageout]=writeSupportOutput(r,p,mask)
+name=[p.outputMaskChannelName '_septum_support'];
+if ~isempty(r.findChannelID(name)),r.removeChannel(name);end
+r.addChannel(mask,name,[.8 .2 1],[0 0 0]);
+if ~isfield(p,'saveChannels'),p.saveChannels={p.outputMaskChannelName};end
+p.saveChannels{end+1}=name;p.septumSupportChannelName=name;imageout=r.image;
 end
 
 function value=fieldOr(s,name,fallback)
 value=fallback;if isfield(s,name),value=s.(name);end
+end
+
+function d=expandTargetQuality(d,goodFrames,frames,q)
+if isempty(d)||isempty(q),return;end
+good=ismember(frames,goodFrames);
+names={'state','sourceLabel','depth','identitySegment','linkState','cavityCandidateCount','backCandidateCount'};
+for i=1:numel(names)
+    key=names{i};if ~isfield(d,key),continue;end
+    if ismember(key,{'sourceLabel','depth'}),a=nan(numel(frames),1);else,a=zeros(numel(frames),1);end
+    a(good)=d.(key);d.(key)=a;
+end
+d.state(q.rejected(frames))=5;
+d.stateLegend{end+1}='5 excluded by focus quality';
+d.qualityExcludedFrames=find(q.rejected)';
+end
+
+function [profileDs,scoreDs]=addFocusDiagnostics(profileDs,scoreDs,q,frames)
+if isempty(q),return;end
+scoreDs.data.focusRejected=q.rejected(frames);
+scoreDs.data.focusDetailRatio=q.detailRatio(frames);
+scoreDs.data.focusEdgeRatio=q.edgeRatio(frames);
+scoreDs.data.focusRejectReason=q.reason(frames);
+profileDs.userData.focusQuality=q;scoreDs.userData.focusQuality=q;
 end
 
 function [profileDs,scoreDs]=addTargetDiagnostics(profileDs,scoreDs,d)
@@ -135,6 +211,12 @@ if isempty(d),return;end
 scoreDs.data.targetSelectionState=d.state;
 scoreDs.data.targetSourceLabel=d.sourceLabel;
 scoreDs.data.targetDepth=d.depth;
+if isfield(d,'identitySegment')
+    scoreDs.data.targetIdentitySegment=d.identitySegment;
+    scoreDs.data.targetLinkState=d.linkState;
+    scoreDs.data.targetCavityCandidateCount=d.cavityCandidateCount;
+    scoreDs.data.targetBackCandidateCount=d.backCandidateCount;
+end
 profileDs.userData.targetSelection=d;scoreDs.userData.targetSelection=d;
 end
 
@@ -756,6 +838,10 @@ switch mode
         anchor = [0.70, 0.55];
     case 'left'
         anchor = [0.30, 0.55];
+    case 'up'
+        anchor = [0.50, 0.30];
+    case 'down'
+        anchor = [0.50, 0.70];
     case 'center'
         anchor = [0.50, 0.55];
     case 'custom'
